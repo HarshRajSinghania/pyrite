@@ -572,6 +572,11 @@ which Pyrite stops being one person's experiment.
   `VALIDATION_FAILED` instead of a near-empty 200, and the `fields` projection
   always keeps `id` and `kb_name`, so `found` can no longer contradict
   `not_found` (#134).
+
+- KBs removed from `config.yaml` become user-managed on the next registry
+  sync, so `pyrite kb remove` no longer rejects them indefinitely. Existing
+  index data and permissions are preserved; KBs still in the config remain
+  protected (#19).
 - **`kb_batch_read` no longer crashes on a malformed spec, and every `fields`
   projection keeps the identity pair.** A non-list `entries`, a non-object item,
   or a missing, empty or non-string `entry_id`/`kb_name` used to raise a raw
