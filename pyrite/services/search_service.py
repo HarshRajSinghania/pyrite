@@ -127,11 +127,45 @@ class SearchService:
         try:
             return self.db.search(**kwargs)
         except sqlite3.OperationalError as e:
+            token = self._offending_token(str(kwargs.get("query") or ""), e)
+            if token:
+                raise QuerySyntaxError(
+                    f"Query could not be parsed: the token '{token}' was read as a "
+                    f'column reference. Quote it — "{token}" — or use AND/OR/NOT '
+                    "only between plain words (sanitization is skipped once you "
+                    "use operators or quotes)."
+                ) from e
             raise QuerySyntaxError(
                 f"Query could not be parsed: {e}. If your query uses AND/OR/NOT "
                 "or phrase quotes, quote any tokens containing - : . yourself "
                 "(sanitization is skipped once you use operators or quotes)."
             ) from e
+
+    @staticmethod
+    def _offending_token(query: str, error: sqlite3.OperationalError) -> str | None:
+        """Name the query token SQLite read as a column reference, or ``None``.
+
+        SQLite reports the *fragment* it kept after splitting a token on one of
+        the separators the guidance names — ``no such column: party`` for
+        ``third-party-doctrine`` — which is not something the caller wrote. A
+        token is named only when the fragment is one of its separator-delimited
+        segments (or the whole token): guessing would mis-attribute the error to
+        an innocent term, so anything else keeps the previous message.
+        """
+        match = re.search(r"no such column:\s*(\S+)", str(error))
+        if not match or not query:
+            return None
+        fragment = match.group(1).strip("\"'(),;").lower()
+        if not fragment:
+            return None
+        for raw in query.split():
+            token = raw.strip("\"'()")
+            if token.lower() == fragment:
+                return token
+            segments = [s for s in re.split(r"[-:.]", token.lower()) if s]
+            if fragment in segments:
+                return token
+        return None
 
     @staticmethod
     def _relax_to_or(query: str) -> str | None:
