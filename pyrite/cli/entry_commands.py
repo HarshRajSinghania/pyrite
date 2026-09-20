@@ -450,11 +450,12 @@ def register_entry_commands(app: typer.Typer) -> None:
                         "VALIDATION_FAILED",
                     )
                 k, v = fv.split("=", 1)
-                try:
-                    v = int(v)
-                except ValueError:
-                    logger.debug("Could not coerce field value to int: %s", v)
-                updates[k] = v
+                # One parser for `-f` on both write commands: JSON arrays and
+                # objects, ints, floats, booleans and comma-separated lists.
+                # This path used to coerce ints only, so `-f tags=alpha,beta`
+                # stored the raw string and the reader then iterated its
+                # characters (#231).
+                updates[k] = _parse_field_value(v)
 
         # ADR-0034 rule 2. `updates` already carries the body under "body",
         # so it is the payload shape the shared rule reads. A marker with no
