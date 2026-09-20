@@ -26,6 +26,7 @@ from ..api import (
     requires_kb_read,
     requires_kb_tier,
 )
+from ..projection import parse_fields_param, project_fields
 from ..schemas import (
     CreateEntryRequest,
     CreateResponse,
@@ -775,11 +776,15 @@ def get_entry(
     result.setdefault("sources", [])
     result.setdefault("tags", [])
 
-    # Apply field projection
-    if fields:
-        fields_list = [f.strip() for f in fields.split(",")]
-        projected_fields = dict.fromkeys(("id", "kb_name", *fields_list))
-        result = {k: result[k] for k in projected_fields if k in result}
+    # Apply field projection. `project_fields` keeps every field the response
+    # models require -- `id`, `kb_name`, `entry_type`, `title` -- not just the
+    # first two, so a projection can never return something that would fail
+    # `EntryResponse` validation if the payload were ever routed back through
+    # it (#179). The projected payload is returned directly, so requested
+    # fields outside the model survive too.
+    fields_list = parse_fields_param(fields)
+    if fields_list:
+        result = project_fields(result, fields_list)
         neg = negotiate_response(request, result)
         if neg is not None:
             return neg

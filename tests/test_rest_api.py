@@ -13,6 +13,7 @@ from fastapi.testclient import TestClient
 from pyrite.config import KBConfig, KBType, PyriteConfig, Settings
 from pyrite.models import EventEntry, PersonEntry
 from pyrite.server.api import create_app
+from pyrite.server.projection import REQUIRED_RESPONSE_FIELDS
 from pyrite.storage.database import PyriteDB
 from pyrite.storage.index import IndexManager
 from pyrite.storage.repository import KBRepository
@@ -222,7 +223,7 @@ class TestSearchEndpoints:
         results = response.json()["results"]
         assert results
         for result in results:
-            assert set(result) == {"id", "kb_name", "title"}
+            assert set(result) == set(REQUIRED_RESPONSE_FIELDS)
 
     def test_search_with_unknown_field_returns_identity_fields(self, test_env):
         client = test_env["client"]
@@ -232,7 +233,9 @@ class TestSearchEndpoints:
         results = response.json()["results"]
         assert results
         for result in results:
-            assert set(result) == {"id", "kb_name"}
+            # An unknown field contributes nothing, so what is left is exactly
+            # the identity set -- never an empty object.
+            assert set(result) == set(REQUIRED_RESPONSE_FIELDS)
 
 
 class TestEntryEndpoints:
@@ -266,7 +269,7 @@ class TestEntryEndpoints:
         response = client.get(f"/api/entries/{entry_id}?kb=test-research&fields=title")
 
         assert response.status_code == 200
-        assert set(response.json()) == {"id", "kb_name", "title"}
+        assert set(response.json()) == set(REQUIRED_RESPONSE_FIELDS)
 
     def test_list_entries(self, test_env):
         client = test_env["client"]
