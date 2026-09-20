@@ -11,6 +11,7 @@ from rich.console import Console
 from rich.table import Table
 
 from ..exceptions import PyriteError
+from ..services.read_shaping import parse_fields_param, project_fields
 from .context import cli_context
 
 console = Console()
@@ -65,10 +66,10 @@ def register_browse_commands(app: typer.Typer) -> None:
             )
             total = svc.count_entries(kb_name=kb_name, entry_type=entry_type, tag=tag)
 
-            # Apply field projection
-            fields_list = [f.strip() for f in fields.split(",")] if fields else None
+            # Apply field projection. One rule for every read surface (#193).
+            fields_list = parse_fields_param(fields)
             if fields_list:
-                entries = [{k: e[k] for k in fields_list if k in e} for e in entries]
+                entries = [project_fields(record, fields_list) for record in entries]
 
             resp_data = {
                 "entries": entries,
@@ -128,10 +129,10 @@ def register_browse_commands(app: typer.Typer) -> None:
         with cli_context() as (config, db, svc):
             results = svc.get_entries(parsed_ids)
 
-            # Apply field projection
-            fields_list = [f.strip() for f in fields.split(",")] if fields else None
+            # Apply field projection. One rule for every read surface (#193).
+            fields_list = parse_fields_param(fields)
             if fields_list:
-                results = [{k: r[k] for k in fields_list if k in r} for r in results]
+                results = [project_fields(record, fields_list) for record in results]
 
             found_ids = {(r.get("id"), r.get("kb_name")) for r in results}
             not_found = [
@@ -298,10 +299,10 @@ def register_browse_commands(app: typer.Typer) -> None:
             if since:
                 entries = [e for e in entries if (e.get("updated_at") or "") >= since]
 
-            # Apply field projection
-            fields_list = [f.strip() for f in fields.split(",")] if fields else None
+            # Apply field projection. One rule for every read surface (#193).
+            fields_list = parse_fields_param(fields)
             if fields_list:
-                entries = [{k: e[k] for k in fields_list if k in e} for e in entries]
+                entries = [project_fields(record, fields_list) for record in entries]
 
             resp_data = {"entries": entries, "count": len(entries)}
 

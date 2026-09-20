@@ -12,6 +12,7 @@ from rich.table import Table
 
 from ..config import load_config
 from ..exceptions import QuerySyntaxError
+from ..services.read_shaping import parse_fields_param, project_fields
 from ..storage.repository import KBRepository
 
 logger = logging.getLogger(__name__)
@@ -213,10 +214,10 @@ def register_search_command(app: typer.Typer):
                     console.print("[yellow]No results found.[/yellow]")
                 return
 
-            # Apply field projection
-            fields_list = [f.strip() for f in fields.split(",")] if fields else None
+            # Apply field projection. One rule for every read surface (#193).
+            fields_list = parse_fields_param(fields)
             if fields_list:
-                results = [{k: r[k] for k in fields_list if k in r} for r in results]
+                results = [project_fields(record, fields_list) for record in results]
             elif not include_body:
                 for r in results:
                     r.pop("body", None)

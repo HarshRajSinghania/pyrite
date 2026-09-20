@@ -15,6 +15,7 @@ import typer
 from rich.console import Console
 
 from ..exceptions import PyriteError, ValidationError
+from ..services.read_shaping import parse_fields_param, project_fields
 from .context import cli_context
 
 logger = logging.getLogger(__name__)
@@ -144,10 +145,11 @@ def register_entry_commands(app: typer.Typer) -> None:
             if not result:
                 _cli_error(f"Entry '{entry_id}' not found", output_format, "NOT_FOUND")
 
-            # Apply field projection
-            if fields:
-                fields_list = [f.strip() for f in fields.split(",")]
-                result = {k: result[k] for k in fields_list if k in result}
+            # Apply field projection. One rule for every read surface (#193):
+            # `--fields` keeps the identity pair, like the REST routes and MCP.
+            fields_list = parse_fields_param(fields)
+            if fields_list:
+                result = project_fields(result, fields_list)
 
             formatted = _format_output(result, output_format)
             if formatted is not None:

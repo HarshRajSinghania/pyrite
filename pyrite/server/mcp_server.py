@@ -38,6 +38,7 @@ from ..services.body_bounds import (
 from ..services.export_service import ExportService
 from ..services.graph_service import GraphService
 from ..services.kb_service import KBService
+from ..services.read_shaping import project_fields
 from ..storage.database import PyriteDB
 from ..storage.index import IndexManager
 from .mcp_rate_limiter import MCPRateLimiter
@@ -93,29 +94,24 @@ _UPDATE_FIELDS = frozenset(
 
 # Identity fields every `fields` projection keeps. Agents key on these to
 # re-fetch, link or report an entry afterwards, and `_kb_batch_read` reads
-# them directly while computing `not_found`. Enforced in one place so the
-# schema's promise holds for kb_search, kb_get, kb_list_entries, kb_recent
-# and kb_batch_read alike (kb-fields-identity-pair-contract).
-_IDENTITY_FIELDS: tuple[str, ...] = ("id", "kb_name")
+# them directly while computing `not_found`. The identity pair itself now lives
+# in `services/read_shaping.py`, shared with the REST routes and the CLI (#193).
 
 
 def _project_fields(entry: dict, fields: list[str] | None) -> dict:
     """Project only requested fields from an entry dict.
 
-    `id` and `kb_name` are always kept when present on the entry, even if the
-    caller's `fields` list omits them.
+    The identity pair and the "never invent a key" rule come from
+    ``read_shaping.project_fields``. What stays here is MCP's own addition: the
+    body truncation markers, when the projection kept a `body`.
 
-    So are the body truncation markers, when the projection kept a `body`:
     ADR-0034 rule 2 forbids silent truncation, and a projection that dropped
     `body_truncated` would hand an agent a slice it cannot tell apart from a
-    whole body. A projection that excluded `body` keeps no markers — there is
-    nothing there to have been truncated.
+    whole body. A projection that excluded `body` keeps no markers, because
+    there is nothing there to have been truncated.
     """
-    if not fields:
-        return entry
-    keys = dict.fromkeys((*_IDENTITY_FIELDS, *fields))
-    out = {k: entry[k] for k in keys if k in entry}
-    if "body" in out and entry.get("body_truncated"):
+    out = project_fields(entry, fields)
+    if out is not entry and "body" in out and entry.get("body_truncated"):
         for key in MARKER_KEYS:
             if key in entry:
                 out[key] = entry[key]

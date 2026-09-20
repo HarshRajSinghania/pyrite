@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
 
 from ...services.kb_service import KBService
+from ...services.read_shaping import parse_fields_param, project_fields
 from ...services.search_service import SearchService
 from ..api import (
     get_kb_service,
@@ -128,11 +129,11 @@ def search(
                     del remaining[k]
             results = grouped[:limit]
 
-        # Apply field projection or strip body
-        if fields:
-            fields_list = [f.strip() for f in fields.split(",")]
-            projected_fields = dict.fromkeys(("id", "kb_name", *fields_list))
-            results = [{k: r[k] for k in projected_fields if k in r} for r in results]
+        # Apply field projection or strip body. One rule for every read
+        # surface (#193).
+        fields_list = parse_fields_param(fields)
+        if fields_list:
+            results = [project_fields(record, fields_list) for record in results]
         elif not include_body:
             for r in results:
                 r.pop("body", None)
@@ -143,7 +144,7 @@ def search(
         neg = negotiate_response(request, resp_data)
         if neg is not None:
             return neg
-        if fields:
+        if fields_list:
             return JSONResponse(content=resp_data)
         return SearchResponse(
             query=q,

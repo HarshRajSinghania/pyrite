@@ -15,6 +15,7 @@ from ...exceptions import (
     ValidationError,
 )
 from ...services.kb_service import KBService
+from ...services.read_shaping import parse_fields_param, project_fields
 from ..api import (
     get_config,
     get_kb_service,
@@ -458,9 +459,10 @@ def batch_read_entries(
     results = svc.get_entries(ids)
 
     if fields_param:
-        # Keep the identity pair in the projection: found_ids below reads it,
-        # and dropping it is what made `found` and `not_found` disagree (#134).
-        results = [{k: r[k] for k in ("id", "kb_name", *fields_param) if k in r} for r in results]
+        # Same rule as every other read surface (#193). found_ids below reads
+        # the identity pair, and dropping it is what made `found` and
+        # `not_found` disagree (#134).
+        results = [project_fields(record, fields_param) for record in results]
 
     found_ids = {(r["id"], r["kb_name"]) for r in results}
     requested = [(e["entry_id"], e["kb_name"]) for e in entries_spec]
@@ -775,11 +777,12 @@ def get_entry(
     result.setdefault("sources", [])
     result.setdefault("tags", [])
 
-    # Apply field projection
-    if fields:
-        fields_list = [f.strip() for f in fields.split(",")]
-        projected_fields = dict.fromkeys(("id", "kb_name", *fields_list))
-        result = {k: result[k] for k in projected_fields if k in result}
+    # Apply field projection. One rule for every read surface (#193): the
+    # identity pair always survives, and keys the entry does not have are not
+    # invented.
+    fields_list = parse_fields_param(fields)
+    if fields_list:
+        result = project_fields(result, fields_list)
         neg = negotiate_response(request, result)
         if neg is not None:
             return neg
