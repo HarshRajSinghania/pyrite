@@ -10,6 +10,7 @@ Inherits shared ORM/SQL logic from BaseBackend.  Only overrides:
 
 from __future__ import annotations
 
+import copy
 import struct
 from typing import Any, ClassVar
 
@@ -36,10 +37,40 @@ class SQLiteBackend(BaseBackend):
         session,
         raw_conn,
         vec_available: bool = False,
+        owner=None,
     ):
-        self._session = session
+        # `owner` is the PyriteDB that built this backend. When given,
+        # `self._session` resolves through it to the *current scope's* session
+        # rather than caching one object for the backend's whole lifetime —
+        # the shared-session bug (#131). An explicit `session` is still
+        # accepted for callers that construct a backend with one they own
+        # (diff/overlay backends, tests).
+        self._owner = owner
+        self._explicit_session = session
         self._raw_conn = raw_conn
         self.vec_available = vec_available
+
+    @property
+    def _session(self):
+        """The session for the current scope (see ``PyriteDB.session``)."""
+        if self._owner is not None:
+            return self._owner.session
+        return self._explicit_session
+
+    @_session.setter
+    def _session(self, value):
+        self._explicit_session = value
+
+    def for_owner(self, owner) -> SQLiteBackend:
+        """A copy of this backend whose session resolves through *owner*.
+
+        Used by ``PyriteDB.request_handle()`` so a per-request handle's ORM
+        reads use that request's session while still sharing the engine, pool
+        and raw connection (#131).
+        """
+        clone = copy.copy(self)
+        clone._owner = owner
+        return clone
 
     def close(self) -> None:
         """No-op — connection lifecycle owned by PyriteDB."""
@@ -48,25 +79,49 @@ class SQLiteBackend(BaseBackend):
     # Raw SQL helpers (sqlite3 positional-param style via _raw_conn)
     # =====================================================================
 
+    def _raw_cursor(self):
+        """Serialised private cursor on the shared raw sqlite3 connection.
+
+        ``_raw_conn`` is one connection shared by every caller — the same
+        lifetime shape the session had (#131 criterion 7). sqlite3 serialises
+        individual statements, but ``Connection.execute()`` returns a cursor
+        whose rows are fetched afterwards, and with
+        ``check_same_thread=False`` two threads can interleave execute and
+        fetch on one implicit cursor. A private cursor under the owner's lock
+        removes that without opening a second connection per request.
+
+        Falls back to the bare connection when no owner supplied a lock (a
+        backend constructed directly in a test).
+        """
+        if self._owner is not None:
+            return self._owner._raw_cursor()
+
+        from contextlib import nullcontext
+
+        return nullcontext(self._raw_conn)
+
     def _exec(self, sql: str, params: dict | None = None) -> list[dict[str, Any]]:
         """Execute raw SQL via the raw sqlite3 connection.
 
         Translates ``:named`` params to ``?``-style for sqlite3.
         """
         sql_out, param_list = self._translate_params(sql, params)
-        rows = self._raw_conn.execute(sql_out, param_list).fetchall()
+        with self._raw_cursor() as cur:
+            rows = cur.execute(sql_out, param_list).fetchall()
         return [dict(r) for r in rows]
 
     def _exec_one(self, sql: str, params: dict | None = None) -> dict | None:
         sql_out, param_list = self._translate_params(sql, params)
-        row = self._raw_conn.execute(sql_out, param_list).fetchone()
+        with self._raw_cursor() as cur:
+            row = cur.execute(sql_out, param_list).fetchone()
         if row is None:
             return None
         return dict(row)
 
     def _exec_scalar(self, sql: str, params: dict | None = None):
         sql_out, param_list = self._translate_params(sql, params)
-        row = self._raw_conn.execute(sql_out, param_list).fetchone()
+        with self._raw_cursor() as cur:
+            row = cur.execute(sql_out, param_list).fetchone()
         return row[0] if row else None
 
     @staticmethod
@@ -229,7 +284,8 @@ class SQLiteBackend(BaseBackend):
             params.append(status)
         sql += " ORDER BY rank LIMIT ? OFFSET ?"
         params.extend([limit, offset])
-        rows = self._raw_conn.execute(sql, params).fetchall()
+        with self._raw_cursor() as cur:
+            rows = cur.execute(sql, params).fetchall()
         return [dict(r) for r in rows]
 
     def search_by_tag(
@@ -247,7 +303,8 @@ class SQLiteBackend(BaseBackend):
             params.append(kb_name)
         sql += " ORDER BY e.date DESC, e.title LIMIT ?"
         params.append(limit)
-        rows = self._raw_conn.execute(sql, params).fetchall()
+        with self._raw_cursor() as cur:
+            rows = cur.execute(sql, params).fetchall()
         return [dict(r) for r in rows]
 
     def search_by_date_range(
@@ -264,7 +321,8 @@ class SQLiteBackend(BaseBackend):
             params.append(kb_name)
         sql += " ORDER BY date ASC LIMIT ?"
         params.append(limit)
-        rows = self._raw_conn.execute(sql, params).fetchall()
+        with self._raw_cursor() as cur:
+            rows = cur.execute(sql, params).fetchall()
         return [dict(r) for r in rows]
 
     def search_by_tag_prefix(
@@ -282,7 +340,8 @@ class SQLiteBackend(BaseBackend):
             params.append(kb_name)
         sql += " ORDER BY e.date DESC, e.title LIMIT ?"
         params.append(limit)
-        rows = self._raw_conn.execute(sql, params).fetchall()
+        with self._raw_cursor() as cur:
+            rows = cur.execute(sql, params).fetchall()
         return [dict(r) for r in rows]
 
     # =====================================================================
@@ -296,19 +355,21 @@ class SQLiteBackend(BaseBackend):
     def upsert_embedding(self, entry_id: str, kb_name: str, embedding: list[float]) -> bool:
         if not self.vec_available:
             return False
-        row = self._raw_conn.execute(
-            "SELECT rowid FROM entry WHERE id = ? AND kb_name = ?",
-            (entry_id, kb_name),
-        ).fetchone()
-        if not row:
-            return False
-        rowid = row[0]
-        blob = self._embedding_to_blob(embedding)
-        self._raw_conn.execute("DELETE FROM vec_entry WHERE rowid = ?", (rowid,))
-        self._raw_conn.execute(
-            "INSERT INTO vec_entry(rowid, embedding) VALUES (?, ?)", (rowid, blob)
-        )
-        self._raw_conn.commit()
+        # One critical section: the rowid lookup, the delete and the insert
+        # are a read-modify-write, and a concurrent writer between them would
+        # orphan or duplicate the vector row.
+        with self._raw_cursor() as cur:
+            row = cur.execute(
+                "SELECT rowid FROM entry WHERE id = ? AND kb_name = ?",
+                (entry_id, kb_name),
+            ).fetchone()
+            if not row:
+                return False
+            rowid = row[0]
+            blob = self._embedding_to_blob(embedding)
+            cur.execute("DELETE FROM vec_entry WHERE rowid = ?", (rowid,))
+            cur.execute("INSERT INTO vec_entry(rowid, embedding) VALUES (?, ?)", (rowid, blob))
+            self._raw_conn.commit()
         return True
 
     def search_semantic(
@@ -322,16 +383,17 @@ class SQLiteBackend(BaseBackend):
             return []
         blob = self._embedding_to_blob(embedding)
         fetch_limit = limit * 3 if kb_name else limit * 2
-        rows = self._raw_conn.execute(
-            """
-            SELECT v.rowid, v.distance, e.*
-            FROM vec_entry v
-            JOIN entry e ON v.rowid = e.rowid
-            WHERE v.embedding MATCH ? AND k = ?
-            ORDER BY v.distance
-            """,
-            (blob, fetch_limit),
-        ).fetchall()
+        with self._raw_cursor() as cur:
+            rows = cur.execute(
+                """
+                SELECT v.rowid, v.distance, e.*
+                FROM vec_entry v
+                JOIN entry e ON v.rowid = e.rowid
+                WHERE v.embedding MATCH ? AND k = ?
+                ORDER BY v.distance
+                """,
+                (blob, fetch_limit),
+            ).fetchall()
         results = []
         for row in rows:
             entry = dict(row)
@@ -348,14 +410,16 @@ class SQLiteBackend(BaseBackend):
     def has_embeddings(self) -> bool:
         if not self.vec_available:
             return False
-        row = self._raw_conn.execute("SELECT COUNT(*) FROM vec_entry").fetchone()
+        with self._raw_cursor() as cur:
+            row = cur.execute("SELECT COUNT(*) FROM vec_entry").fetchone()
         return row[0] > 0
 
     def embedding_stats(self) -> dict[str, Any]:
         if not self.vec_available:
             return {"available": False, "count": 0, "total_entries": 0}
-        vec_count = self._raw_conn.execute("SELECT COUNT(*) FROM vec_entry").fetchone()[0]
-        entry_count = self._raw_conn.execute("SELECT COUNT(*) FROM entry").fetchone()[0]
+        with self._raw_cursor() as cur:
+            vec_count = cur.execute("SELECT COUNT(*) FROM vec_entry").fetchone()[0]
+            entry_count = cur.execute("SELECT COUNT(*) FROM entry").fetchone()[0]
         return {
             "available": True,
             "count": vec_count,
@@ -366,28 +430,31 @@ class SQLiteBackend(BaseBackend):
     def get_embedded_rowids(self) -> set[int]:
         if not self.vec_available:
             return set()
-        rows = self._raw_conn.execute("SELECT rowid FROM vec_entry").fetchall()
+        with self._raw_cursor() as cur:
+            rows = cur.execute("SELECT rowid FROM vec_entry").fetchall()
         return {r[0] for r in rows}
 
     def get_entries_for_embedding(self, kb_name: str | None = None) -> list[dict[str, Any]]:
-        if kb_name:
-            rows = self._raw_conn.execute(
-                "SELECT rowid, id, kb_name, title, summary, body FROM entry WHERE kb_name = ?",
-                (kb_name,),
-            ).fetchall()
-        else:
-            rows = self._raw_conn.execute(
-                "SELECT rowid, id, kb_name, title, summary, body FROM entry"
-            ).fetchall()
+        with self._raw_cursor() as cur:
+            if kb_name:
+                rows = cur.execute(
+                    "SELECT rowid, id, kb_name, title, summary, body FROM entry WHERE kb_name = ?",
+                    (kb_name,),
+                ).fetchall()
+            else:
+                rows = cur.execute(
+                    "SELECT rowid, id, kb_name, title, summary, body FROM entry"
+                ).fetchall()
         return [dict(r) for r in rows]
 
     def delete_embedding(self, entry_id: str, kb_name: str) -> None:
         if not self.vec_available:
             return
-        row = self._raw_conn.execute(
-            "SELECT rowid FROM entry WHERE id = ? AND kb_name = ?",
-            (entry_id, kb_name),
-        ).fetchone()
-        if row:
-            self._raw_conn.execute("DELETE FROM vec_entry WHERE rowid = ?", (row[0],))
-            self._raw_conn.commit()
+        with self._raw_cursor() as cur:
+            row = cur.execute(
+                "SELECT rowid FROM entry WHERE id = ? AND kb_name = ?",
+                (entry_id, kb_name),
+            ).fetchone()
+            if row:
+                cur.execute("DELETE FROM vec_entry WHERE rowid = ?", (row[0],))
+                self._raw_conn.commit()
