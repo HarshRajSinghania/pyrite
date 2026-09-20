@@ -1883,6 +1883,65 @@ class TestSubdirectoryMismatchInHealth:
             finally:
                 db.close()
 
+    def test_subdirectory_trailing_slash_is_not_a_mismatch(self):
+        """`subdirectory: events/` and `events` are the same directory (#44).
+
+        The health check compared the declared string, trailing slash and all,
+        against a path component, so every correctly placed entry of every type
+        whose declared subdirectory ended in `/` was reported as a mismatch. An
+        entry genuinely in the wrong place must still be flagged.
+        """
+        with tempfile.TemporaryDirectory() as raw_tmp:
+            tmp = Path(raw_tmp)
+            kb_path = tmp / "slash-kb"
+            kb_path.mkdir()
+            (kb_path / "kb.yaml").write_text(
+                "name: slash-kb\n"
+                "kb_type: events\n"
+                "types:\n"
+                "  timeline_event:\n"
+                "    description: Event\n"
+                "    subdirectory: events/\n"
+            )
+            (kb_path / "events").mkdir()
+            right_path = kb_path / "events" / "right-place.md"
+            wrong_path = kb_path / "wrong-place.md"
+
+            db, config = self._make_config(tmp, kb_path)
+            try:
+                db.upsert_entry(
+                    {
+                        "id": "right-place",
+                        "kb_name": kb_path.name,
+                        "entry_type": "timeline_event",
+                        "title": "Right",
+                        "body": "body",
+                        "file_path": str(right_path),
+                    }
+                )
+                db.upsert_entry(
+                    {
+                        "id": "wrong-place",
+                        "kb_name": kb_path.name,
+                        "entry_type": "timeline_event",
+                        "title": "Wrong",
+                        "body": "body",
+                        "file_path": str(wrong_path),
+                    }
+                )
+
+                index_mgr = IndexManager(db, config)
+                health = index_mgr.check_health()
+
+                mismatches = health["subdirectory_mismatches"]
+                assert not any(m["id"] == "right-place" for m in mismatches), mismatches
+                flagged = [m for m in mismatches if m["id"] == "wrong-place"]
+                assert len(flagged) == 1, mismatches
+                # Reported expectation is the directory, not the spelling.
+                assert flagged[0]["declared_subdirectory"] == "events"
+            finally:
+                db.close()
+
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

@@ -883,7 +883,10 @@ class IndexManager:
 
                 # Subdirectory mismatch. An empty string means "explicitly
                 # KB root allowed"; None means "no hint"; any non-empty
-                # string is the expected first-path-component.
+                # string is the expected first-path-component. Both sides are
+                # normalized: a declared `people/` and the path component
+                # `people` are the same directory, so a trailing slash is a
+                # spelling, not a location (#44).
                 declared_sub = type_schema.subdirectory
                 if declared_sub:  # non-empty string
                     file_path = row["file_path"]
@@ -893,13 +896,13 @@ class IndexManager:
                             actual_sub = rel.parts[0] if len(rel.parts) > 1 else ""
                         except ValueError:
                             actual_sub = ""
-                        if actual_sub != declared_sub:
+                        if actual_sub.strip("/") != declared_sub.strip("/"):
                             health["subdirectory_mismatches"].append(
                                 {
                                     "kb": kb.name,
                                     "id": row["id"],
                                     "type": row["entry_type"],
-                                    "declared_subdirectory": declared_sub,
+                                    "declared_subdirectory": declared_sub.strip("/"),
                                     "actual_path": actual_sub or ".",
                                 }
                             )
