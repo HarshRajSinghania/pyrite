@@ -16,16 +16,46 @@ guarantee: flip the policy and every leaked connection is back to racing
 `rmtree`. So this asserts on the connection, not on whether a directory
 removal happened to survive.
 
-The two tests are ordered on purpose: the first creates a client, the second
-inspects the directory AFTER the first test's fixture teardown has run.
-Asserting inside the first test would run before teardown and prove nothing.
+The check has to run AFTER `make_client`'s teardown, which is why it lives in a
+fixture of its own: pytest tears fixtures down in reverse order of setup, so
+requesting the probe before `make_client` makes it finalize after it. That
+keeps the test self-contained -- an earlier version split it across two tests
+and shared a module-level dict, which broke whenever xdist put them on
+different workers.
 """
 
-_state: dict = {}
+import pytest
 
 
-def test_make_client_app_uses_a_second_connection(make_client):
-    """Guard the premise: if this stops being true, the test below is vacuous."""
+@pytest.fixture
+def wal_teardown_probe():
+    """Assert, after `make_client` has torn down, that no WAL/SHM file survived.
+
+    Requested BEFORE `make_client` in the test signature: fixtures finalize in
+    reverse order of setup, so this runs after the client fixture's teardown,
+    which is the moment the leak is visible.
+    """
+    state: dict = {}
+    yield state
+
+    work_dir = state["dir"]
+    leftovers = sorted(p.name for p in work_dir.iterdir())
+    live = [name for name in leftovers if name.endswith(("-wal", "-shm"))]
+    assert not live, (
+        f"SQLite WAL/SHM files are still live after teardown: {leftovers}. "
+        "Some connection on this database was not closed -- most likely "
+        "application.state.pyrite_db, which create_app opens and nothing in "
+        "pyrite/ closes."
+    )
+
+
+def test_fixture_leaves_no_live_wal_connection(wal_teardown_probe, make_client):
+    """One self-contained test: build a client, then let the fixtures tear down.
+
+    The premise is asserted here -- create_app parks a second `PyriteDB` on
+    `app.state`, and nothing in `pyrite/` closes it -- and the WAL assertion
+    runs in `wal_teardown_probe`'s finalizer, after `make_client`'s teardown.
+    """
     client, config, db = make_client()
     assert client.get("/api/kbs").status_code == 200
 
@@ -36,19 +66,4 @@ def test_make_client_app_uses_a_second_connection(make_client):
         "now intentional, the fixture's app-state tracking can be simplified"
     )
 
-    _state["dir"] = config.settings.index_path.parent
-
-
-def test_no_wal_files_survive_the_fixture_teardown():
-    """Runs after the test above, so `make_client`'s teardown has completed."""
-    work_dir = _state.get("dir")
-    assert work_dir is not None, "the previous test did not run"
-
-    leftovers = sorted(p.name for p in work_dir.iterdir())
-    live = [n for n in leftovers if n.endswith("-wal") or n.endswith("-shm")]
-    assert not live, (
-        f"SQLite WAL/SHM files are still live after teardown: {leftovers}. "
-        "Some connection on this database was not closed -- most likely "
-        "application.state.pyrite_db, which create_app opens and nothing in "
-        "pyrite/ closes."
-    )
+    wal_teardown_probe["dir"] = config.settings.index_path.parent
