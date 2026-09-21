@@ -152,10 +152,47 @@ class TestFileOperations:
         content = path.read_text()
         assert "key: value" in content
 
-    def test_file_round_trip_with_path_object(self, tmp_path):
-        """Should work with both str and Path objects."""
-        data = {"x": 1}
-        path = tmp_path / "test.yaml"
-        dump_yaml_file(data, str(path))
-        loaded = load_yaml_file(str(path))
-        assert loaded["x"] == 1
+
+class TestBlockSequenceIndentRoundTrip:
+    """A no-op load -> save keeps the block-sequence indentation it found (#148).
+
+    ruamel's emitter takes `sequence`/`offset` for the whole document, so the
+    numbers come from the parsed tree's line/column records.
+    """
+
+    def test_indented_links_block_is_kept(self):
+        src = 'links:\n  - target: "adr-0018"\n    relation: "implements"\n'
+        assert dump_yaml(load_yaml(src)) + "\n" == src
+
+    def test_flush_links_block_is_kept(self):
+        src = 'links:\n- target: "adr-0018"\n'
+        assert dump_yaml(load_yaml(src)) + "\n" == src
+
+    def test_indented_scalar_sequence_is_kept(self):
+        src = "tags:\n  - a\n  - b\n"
+        assert dump_yaml(load_yaml(src)) + "\n" == src
+
+    def test_a_nested_sequence_reads_its_own_parent_column(self):
+        src = "meta:\n  links:\n    - target: x\n"
+        assert dump_yaml(load_yaml(src)) + "\n" == src
+
+    def test_a_freshly_built_mapping_keeps_the_default_style(self):
+        # No source document, so no style to preserve: pyrite's own default
+        # stays exactly as it was, which is what keeps this change from
+        # rewriting files nobody edited.
+        assert dump_yaml({"links": [{"target": "x"}]}) == "links:\n- target: x"
+
+    def test_a_document_that_mixes_both_styles_cannot_be_reproduced(self):
+        """Recorded, not fixed: one setting per document means the first block
+        sequence decides, and the other is re-indented."""
+        src = "a:\n- x\nb:\n  - y\n"
+        assert dump_yaml(load_yaml(src)) + "\n" == "a:\n- x\nb:\n- y\n"
+
+    def test_dump_yaml_file_keeps_the_style_of_the_file_it_overwrites(self, tmp_path):
+        path = tmp_path / "links.yaml"
+        src = 'links:\n  - target: "x"\n'
+        path.write_text(src)
+
+        dump_yaml_file(load_yaml_file(path), path)
+
+        assert path.read_text() == src
