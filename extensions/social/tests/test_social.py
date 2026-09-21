@@ -2,6 +2,7 @@
 
 import sqlite3
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from pyrite_social.entry_types import WRITEUP_TYPES, UserProfileEntry, WriteupEntry
@@ -16,6 +17,64 @@ from pyrite.plugins.registry import PluginRegistry
 # =========================================================================
 # Plugin registration
 # =========================================================================
+
+
+class TestReadableSetFiltering:
+    """`social_top` and `social_newest` narrow to the caller's readable KBs.
+
+    `kb_name` is optional on both, so with it omitted they read the whole
+    index. The MCP chokepoint refuses an optional-KB tool that cannot filter
+    for a scoped caller -- safe, but a product regression -- and these two
+    take the readable set now, so a scoped caller gets a filtered page
+    instead of a refusal (#223).
+    """
+
+    @pytest.fixture
+    def plugin(self, tmp_path):
+        conn = sqlite3.connect(tmp_path / "index.db")
+        conn.row_factory = sqlite3.Row
+        conn.execute(
+            "CREATE TABLE entry (id TEXT, kb_name TEXT, title TEXT, entry_type TEXT,"
+            " metadata TEXT, created_at TEXT)"
+        )
+        conn.execute(
+            "CREATE TABLE social_vote (entry_id TEXT, kb_name TEXT, value INTEGER, created_at TEXT)"
+        )
+        conn.executemany(
+            "INSERT INTO entry (id, kb_name, title, entry_type, metadata, created_at)"
+            " VALUES (?, ?, ?, 'writeup', NULL, ?)",
+            [
+                ("pub-1", "public-kb", "Public writeup", "2026-01-01"),
+                ("priv-1", "private-kb", "Private writeup", "2026-01-02"),
+            ],
+        )
+        conn.commit()
+
+        plugin = SocialPlugin()
+        plugin._get_db = lambda: (SimpleNamespace(_raw_conn=conn), False)
+        return plugin
+
+    def test_newest_narrows_to_the_readable_set(self, plugin):
+        out = plugin._mcp_newest({}, readable_kbs={"public-kb"})
+        assert [w["id"] for w in out["newest"]] == ["pub-1"]
+
+    def test_top_narrows_to_the_readable_set(self, plugin):
+        out = plugin._mcp_top({}, readable_kbs={"public-kb"})
+        assert [w["id"] for w in out["top"]] == ["pub-1"]
+
+    def test_an_unscoped_caller_still_spans_every_kb(self, plugin):
+        out = plugin._mcp_newest({})
+        assert {w["id"] for w in out["newest"]} == {"pub-1", "priv-1"}
+
+    def test_an_empty_readable_set_returns_nothing_rather_than_everything(self, plugin):
+        assert plugin._mcp_newest({}, readable_kbs=set()) == {"count": 0, "newest": []}
+        assert plugin._mcp_top({}, readable_kbs=set()) == {"count": 0, "top": []}
+
+    def test_a_named_kb_binds_to_that_kb(self, plugin):
+        out = plugin._mcp_newest(
+            {"kb_name": "private-kb"}, readable_kbs={"public-kb", "private-kb"}
+        )
+        assert [w["id"] for w in out["newest"]] == ["priv-1"]
 
 
 class TestPluginRegistration:

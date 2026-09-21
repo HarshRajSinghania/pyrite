@@ -16,6 +16,29 @@ from .tables import SOCIAL_TABLES
 from .validators import validate_social
 
 
+def _kb_scope_clause(
+    column: str, kb_name: str | None, readable_kbs: set[str] | None
+) -> tuple[str, list[str]]:
+    """The SQL narrowing one KB-bearing read needs (#223).
+
+    A named KB wins: the MCP chokepoint has already refused one the caller may
+    not read, so binding it is both correct and narrower than the set. With no
+    name given and a readable set in hand, the read narrows to that set -- an
+    empty one matches nothing (`AND 1 = 0`, because `IN ()` is a syntax error)
+    rather than quietly spanning the index. `readable_kbs=None` is the
+    unscoped caller (global admin, operator API key, local stdio) and adds no
+    narrowing at all, exactly as before.
+    """
+    if kb_name:
+        return f" AND {column} = ?", [kb_name]
+    if readable_kbs is None:
+        return "", []
+    if not readable_kbs:
+        return " AND 1 = 0", []
+    placeholders = ",".join("?" for _ in readable_kbs)
+    return f" AND {column} IN ({placeholders})", sorted(readable_kbs)
+
+
 class SocialPlugin:
     """Social KB plugin for pyrite.
 
@@ -176,7 +199,9 @@ class SocialPlugin:
         config = load_config()
         return PyriteDB(config.settings.index_path), True
 
-    def _mcp_top(self, args: dict[str, Any]) -> dict[str, Any]:
+    def _mcp_top(
+        self, args: dict[str, Any], *, readable_kbs: set[str] | None = None
+    ) -> dict[str, Any]:
         """Get highest-voted writeups."""
         import json
 
@@ -194,9 +219,9 @@ class SocialPlugin:
                 WHERE e.entry_type = 'writeup'
             """
             params: list = []
-            if kb_name:
-                query += " AND e.kb_name = ?"
-                params.append(kb_name)
+            clause, scope_params = _kb_scope_clause("e.kb_name", kb_name, readable_kbs)
+            query += clause
+            params.extend(scope_params)
             if period == "week":
                 query += " AND v.created_at >= datetime('now', '-7 days')"
             elif period == "month":
@@ -227,7 +252,9 @@ class SocialPlugin:
             if should_close:
                 db.close()
 
-    def _mcp_newest(self, args: dict[str, Any]) -> dict[str, Any]:
+    def _mcp_newest(
+        self, args: dict[str, Any], *, readable_kbs: set[str] | None = None
+    ) -> dict[str, Any]:
         """Get most recent writeups."""
         import json
 
@@ -238,9 +265,9 @@ class SocialPlugin:
         try:
             query = "SELECT * FROM entry WHERE entry_type = 'writeup'"
             params: list = []
-            if kb_name:
-                query += " AND kb_name = ?"
-                params.append(kb_name)
+            clause, scope_params = _kb_scope_clause("kb_name", kb_name, readable_kbs)
+            query += clause
+            params.extend(scope_params)
             query += " ORDER BY created_at DESC LIMIT ?"
             params.append(limit)
 

@@ -201,7 +201,6 @@ OPTIONAL_KB_TOOLS: dict[str, str] = {
                 "wiki_review_queue",
                 "wiki_stubs",
             ),
-            "extensions/social": ("social_newest", "social_top"),
             "extensions/zettelkasten": ("zettel_inbox",),
         }.items()
         for name in names
