@@ -831,6 +831,20 @@ def test_no_second_clone_implementation_returning_raw_stderr():
     assert not hasattr(github_auth, "clone_private_repo")
 
 
+def test_no_second_pull_implementation_returning_raw_stderr():
+    """`github_auth.pull_repo` was the same shape of hole as
+    `clone_private_repo`: a second, dead `git pull` that returned
+    `f"Pull failed: {result.stderr}"` with only the token replaced, so the
+    message carried absolute paths and bypassed `GitService.sanitize_error`.
+
+    `git grep pull_repo` found only the definition, so there was no caller to
+    migrate and it is gone rather than routed through the sanitiser. It must
+    not come back as a way around the redaction (#185)."""
+    import pyrite.github_auth as github_auth
+
+    assert not hasattr(github_auth, "pull_repo")
+
+
 class TestErrorDetailHygiene:
     """Should-fix items: the public code set is closed, and messages are not
     double-prefixed."""

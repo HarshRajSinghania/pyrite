@@ -339,33 +339,3 @@ def get_github_user_info(token: str) -> dict | None:
     except Exception:
         logger.warning("Failed to get GitHub user info", exc_info=True)
     return None
-
-
-def pull_repo(local_path: Path) -> tuple[bool, str]:
-    """Pull latest changes for a repository."""
-    token = get_github_token()
-
-    import subprocess
-
-    env = os.environ.copy()
-
-    # Set up credential helper if we have a token
-    if token:
-        # Use GIT_ASKPASS to provide credentials
-        env["GIT_ASKPASS"] = "echo"
-        env["GIT_USERNAME"] = "oauth2"
-        env["GIT_PASSWORD"] = token
-
-    try:
-        result = subprocess.run(
-            ["git", "pull"], cwd=local_path, capture_output=True, text=True, env=env
-        )
-        if result.returncode == 0:
-            return True, result.stdout.strip() or "Already up to date"
-        else:
-            error = result.stderr
-            if token:
-                error = error.replace(token, "***")
-            return False, f"Pull failed: {error}"
-    except Exception as e:
-        return False, f"Pull failed: {e}"
