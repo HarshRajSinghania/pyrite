@@ -9,7 +9,7 @@ no service-layer duplication.
 from fastapi import APIRouter, Depends, Query, Request
 
 from ...services.link_discovery_service import LinkDiscoveryService
-from ..api import get_link_discovery_service, limiter, requires_kb_read
+from ..api import get_link_discovery_service, get_readable_kbs, limiter, requires_kb_read
 
 router = APIRouter(tags=["Links"])
 
@@ -25,8 +25,16 @@ def discover_neighbors(
     mode: str = Query("hybrid", description="Search mode: keyword, semantic, hybrid"),
     exclude_linked: bool = Query(True, description="Exclude entries already linked"),
     svc: LinkDiscoveryService = Depends(get_link_discovery_service),
+    readable: set[str] | None = Depends(get_readable_kbs),
 ):
-    """Find semantically similar but unlinked entries across KBs."""
+    """Find semantically similar but unlinked entries across KBs.
+
+    `requires_kb_read()` refuses any KB this call names that the caller may
+    not read; `readable` keeps the *candidates* to readable KBs as well.
+    With `target_kb` omitted the search spans the index, so the second half
+    is what stops a readable KB's entry being matched against a private
+    KB's entry and handed back as a suggestion (#186).
+    """
     candidates = svc.discover_neighbors(
         entry_id=entry_id,
         kb_name=kb,
@@ -34,6 +42,7 @@ def discover_neighbors(
         limit=limit,
         mode=mode,
         exclude_linked=exclude_linked,
+        readable_kbs=readable,
     )
 
     return {
@@ -54,6 +63,7 @@ def batch_suggest(
     mode: str = Query("keyword", description="Search mode: keyword, semantic, hybrid"),
     exclude_linked: bool = Query(True, description="Exclude entries already linked"),
     svc: LinkDiscoveryService = Depends(get_link_discovery_service),
+    readable: set[str] | None = Depends(get_readable_kbs),
 ):
     """Batch-compare two KBs to find potential cross-KB links."""
     pairs = svc.batch_suggest(
@@ -62,6 +72,7 @@ def batch_suggest(
         limit_per_entry=limit_per_entry,
         mode=mode,
         exclude_linked=exclude_linked,
+        readable_kbs=readable,
     )
 
     return {

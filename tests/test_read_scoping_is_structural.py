@@ -19,11 +19,13 @@ that **the resolver looks everywhere the handler reads**:
 compares each scoped route's declared KB-bearing parameters -- query
 names *and* aliases, path params, and `kb`/`kb_name` fields of a body
 model -- against `RESOLVED_KB_LOCATIONS`, the set
-`pyrite.server.api._resolve_kb_names` actually inspects. A handful of
-routes take a *secondary* KB under another name (`target_kb`,
-`source_kb`, `center_kb`); each is listed in `SECONDARY_KB_PARAMETERS`
-with what is known about it, including the two on `links.py` that are
-genuinely not covered and belong to part 2.
+`pyrite.server.api._resolve_kb_names` actually inspects. A route that
+takes a *secondary* KB under another name (`center_kb` on `/api/graph`)
+is listed in `SECONDARY_KB_PARAMETERS` with what is known about it. The
+two `links.py` entries that used to be listed there are resolved rather
+than recorded now: `source_kb` and `target_kb` joined `KB_PARAM_NAMES`
+in #186, and the service behind those routes takes the caller's readable
+set, so a candidate cannot come from a private KB.
 
 **What the walk cannot see -- recorded, not reviewed.** It visits
 `APIRoute`s under `/api` only. Two surfaces are therefore absent rather
@@ -71,40 +73,23 @@ SCOPING_DEPENDENCIES = {
 # KB-bearing parameter outside this set reads its KB from somewhere the
 # resolver does not look -- which is exactly the hole that let a request
 # name two KBs and be checked against the wrong one.
-RESOLVED_KB_LOCATIONS = {"kb", "kb_name"}
+RESOLVED_KB_LOCATIONS = {"kb", "kb_name", "source_kb", "target_kb"}
 
-# A route's *primary* KB is the one the resolver checks. A few routes also
-# take a **secondary** KB parameter -- "compare against that KB too",
-# "centre the graph there" -- which the resolver does not see, because it
-# is not `kb` or `kb_name`. Each one is listed here with what is known
-# about it, so the gate stays meaningful (it fires on any name not listed)
-# without silently blessing the ones that exist.
+# A route's *primary* KB is the one the resolver checks. A route can also
+# take a **secondary** KB parameter -- "centre the graph there" -- which the
+# resolver does not see, because it is not in `KB_PARAM_NAMES`. Each one is
+# listed here with what is known about it, so the gate stays meaningful (it
+# fires on any name not listed) without silently blessing the ones that
+# exist.
 #
-# These routes are outside part 1's list; this file is where their status
-# is recorded, not where it is fixed.
+# The `links.py` pair (`target_kb`, `source_kb`) used to be here as part 2
+# of this work. They are gone because the resolver reads them now (#186).
 SECONDARY_KB_PARAMETERS: dict[tuple[str, str], dict[str, str]] = {
     ("GET", "/api/graph"): {
         "center_kb": (
             "secondary, and harmless: get_graph filters nodes and edges by "
             "`readable` after building the graph, so a KB named here that the "
             "caller cannot read contributes nothing to the response."
-        ),
-    },
-    ("GET", "/api/links/discover-neighbors"): {
-        "target_kb": (
-            "secondary, and NOT covered: requires_kb_read() checks `kb` only, "
-            "and LinkDiscoveryService.discover_neighbors takes no readable set, "
-            "so candidates can come from a KB the caller may not read. Part 2."
-        ),
-    },
-    ("GET", "/api/links/batch-suggest"): {
-        "source_kb": (
-            "the route's real primary KB, under a name the resolver does not "
-            "read -- requires_kb_read() finds no `kb` at all here. Part 2."
-        ),
-        "target_kb": (
-            "secondary, and NOT covered: LinkDiscoveryService.batch_suggest "
-            "takes no readable set. Part 2."
         ),
     },
     ("GET", "/api/search"): {

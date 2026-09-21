@@ -1452,7 +1452,9 @@ class PyriteMCPServer:
             "kb_name": task.get("kb_name", kb_name or ""),
         }
 
-    def _kb_batch_suggest(self, args: dict[str, Any]) -> dict[str, Any]:
+    def _kb_batch_suggest(
+        self, args: dict[str, Any], *, readable_kbs: set[str] | None = None
+    ) -> dict[str, Any]:
         """Batch-compare two KBs to find potential cross-KB links."""
         source_kb = args.get("source_kb")
         target_kb = args.get("target_kb")
@@ -1468,6 +1470,7 @@ class PyriteMCPServer:
             limit_per_entry=args.get("limit_per_entry", 3),
             mode=args.get("mode", "keyword"),
             exclude_linked=args.get("exclude_linked", True),
+            readable_kbs=readable_kbs,
         )
 
         return {
@@ -1477,7 +1480,9 @@ class PyriteMCPServer:
             "pairs": pairs,
         }
 
-    def _kb_discover_neighbors(self, args: dict[str, Any]) -> dict[str, Any]:
+    def _kb_discover_neighbors(
+        self, args: dict[str, Any], *, readable_kbs: set[str] | None = None
+    ) -> dict[str, Any]:
         """Find semantically similar but unlinked entries across KBs."""
         entry_id = args.get("entry_id")
         kb_name = args.get("kb_name")
@@ -1494,6 +1499,7 @@ class PyriteMCPServer:
             limit=args.get("limit", 10),
             mode=args.get("mode", "hybrid"),
             exclude_linked=args.get("exclude_linked", True),
+            readable_kbs=readable_kbs,
         )
 
         return {

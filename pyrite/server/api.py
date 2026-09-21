@@ -492,7 +492,17 @@ def requires_tier(tier: str):
 # The parameter names that name a knowledge base, in every location a
 # request can carry one. Pinned by tests/test_read_scoping_is_structural.py,
 # which fails if a handler declares a KB-bearing parameter outside this set.
-KB_PARAM_NAMES = ("kb", "kb_name")
+#
+# `source_kb` and `target_kb` are the *secondary* KBs the `links.py` routes
+# name alongside their primary one. They belong here rather than in a
+# per-route allowlist: the rule is that naming two KBs gets both checked, so
+# the only thing a route-specific exception would buy is a request that names
+# a readable KB in one parameter and serves from a private one in the other
+# (#186). `center_kb` is deliberately absent -- `/api/graph` filters nodes and
+# edges by the readable set after building the graph, so a KB named there that
+# the caller cannot read contributes nothing to the response, and checking it
+# would turn a harmless name into a 404.
+KB_PARAM_NAMES = ("kb", "kb_name", "source_kb", "target_kb")
 
 
 class _UnparseableBodyError(Exception):
@@ -503,9 +513,11 @@ class _UnparseableBodyError(Exception):
 async def _resolve_kb_names(request: Request) -> list[str]:
     """Every KB this request names, in every location it can name one.
 
-    Query parameters (`kb` and `kb_name` -- `reviews.py` binds
-    `Query(..., alias="kb_name")`, so the wire name differs from the
-    Python one), path parameters, and the JSON body's `kb`/`kb_name`.
+    Query parameters (every name in `KB_PARAM_NAMES` -- `reviews.py` binds
+    `Query(..., alias="kb_name")`, so the wire name differs from the Python
+    one), path parameters, and the JSON body's `kb`/`kb_name`. A route that
+    takes a *secondary* KB (`source_kb`, `target_kb`) is therefore checked
+    against that one too, not only against its primary.
 
     **Every** value is returned, never just the first. A request that names
     two KBs used to be checked against whichever spelling the resolver

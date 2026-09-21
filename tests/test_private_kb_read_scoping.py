@@ -18,6 +18,7 @@ from pyrite.config import AuthConfig, KBConfig, PyriteConfig, Settings
 from pyrite.server.api import create_app, get_config, get_db
 from pyrite.services.auth_service import AuthService
 from pyrite.services.kb_service import KBService
+from pyrite.services.link_discovery_service import LinkDiscoveryService
 from pyrite.storage.database import PyriteDB
 
 PUBLIC, PRIVATE = "public-kb", "private-kb"
@@ -241,6 +242,13 @@ KB_NAMED_ROUTES = [
     "/api/entries?kb={kb}",
     "/api/entries/secret-note?kb={kb}",
     "/api/search?q=zebra&kb={kb}",
+    # The secondary KBs on the link-discovery routes: naming the private KB
+    # as `target_kb`, or as `source_kb` where that is the route's real
+    # primary, must be refused exactly like naming it as `kb` -- and a
+    # caller who may read it must still get through (#186).
+    "/api/links/discover-neighbors?entry_id=public-note&kb=public-kb&target_kb={kb}",
+    "/api/links/batch-suggest?source_kb={kb}&target_kb=public-kb",
+    "/api/links/batch-suggest?source_kb=public-kb&target_kb={kb}",
 ]
 
 # The same routes, but with the KB named TWICE: once where the handler will
@@ -691,6 +699,58 @@ class TestScopingIsNotAWallForCallersWhoMayRead:
         assert r.status_code != 404 or "KB_NOT_FOUND" not in r.text, (
             f"{route}: scoping 404'd a peer holding a read grant -- {r.text[:200]}"
         )
+
+
+class TestLinkDiscoveryCandidatesAreReadableKBsOnly:
+    """The `/api/links/discover-neighbors` search spans *every* KB when
+    `target_kb` is omitted, so refusing a KB the call named cannot cover it:
+    the candidate list itself has to be restricted to what the caller may
+    read. Without that, a peer naming only a readable KB was handed a private
+    KB's title and snippet back as a suggestion (#186).
+    """
+
+    def test_the_search_really_does_reach_the_private_kb_without_the_set(self, env):
+        """Non-vacuity, at the layer the hole is in.
+
+        The same call the route now filters returns the private KB's entry
+        when no readable set is supplied -- which is what an unscoped caller
+        (operator API key, global admin, the CLI) passes on purpose. So the
+        route's empty private set is the filter working, not an index that
+        happened to match nothing.
+        """
+        svc = LinkDiscoveryService(env["config"], env["db"])
+        unscoped = svc.discover_neighbors(entry_id="public-note", kb_name=PUBLIC, mode="keyword")
+        assert PRIVATE in {c["kb_name"] for c in unscoped}, unscoped
+
+        scoped = svc.discover_neighbors(
+            entry_id="public-note", kb_name=PUBLIC, mode="keyword", readable_kbs={PUBLIC}
+        )
+        assert all(c["kb_name"] == PUBLIC for c in scoped), scoped
+
+    def test_spanning_discovery_returns_nothing_from_a_private_kb(self, env):
+        # `mode=keyword` pinned: the route's default is hybrid, which reaches
+        # for embeddings and can return nothing at all in a fixture whose
+        # vector index is empty -- an empty answer would make this vacuous.
+        r = env["peer"].get(
+            f"/api/links/discover-neighbors?entry_id=public-note&kb={PUBLIC}&mode=keyword"
+        )
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["count"] > 0, body
+        assert {d["kb_name"] for d in body["discoveries"]} == {PUBLIC}
+        assert "secret-note" not in {d["id"] for d in body["discoveries"]}
+        assert "zebra behind the wall" not in r.text
+
+    def test_a_grant_lets_the_same_call_match_against_the_private_kb(self, env):
+        """The filter follows the grant instead of walling the KB off."""
+        auth = AuthService(env["db"], env["config"].settings.auth)
+        users = {u["username"]: u for u in auth.list_users()}
+        auth.grant_kb_permission(users["peer"]["id"], PRIVATE, "read", users["admin-user"]["id"])
+        r = env["peer"].get(
+            f"/api/links/discover-neighbors?entry_id=public-note&kb={PUBLIC}&target_kb={PRIVATE}"
+        )
+        assert r.status_code == 200, r.text
+        assert {d["kb_name"] for d in r.json()["discoveries"]} <= {PRIVATE}
 
 
 @pytest.mark.parametrize("route", KB_SPANNING_ROUTES)

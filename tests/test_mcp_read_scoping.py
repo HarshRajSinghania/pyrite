@@ -271,6 +271,25 @@ class TestPeerCannotReachPrivateKBOverMCP:
         out = _call(env, "peer", "task_list", {})
         assert all(t.get("kb_name") == PUBLIC for t in out["tasks"])
 
+    def test_kb_discover_neighbors_spanning_returns_only_public_candidates(self, env):
+        # With `target_kb` omitted the service searches every KB, so the
+        # candidate list itself is the hole: a peer naming only a readable
+        # KB could be handed a private entry's title and snippet back as a
+        # suggestion. The readable set now goes into the service (#186).
+        out = _call(
+            env,
+            "peer",
+            "kb_discover_neighbors",
+            # `keyword` pinned: the tool's default is hybrid, which can return
+            # nothing in a fixture with an empty vector index -- and an empty
+            # answer would make the assertion below vacuous.
+            {"entry_id": "public-note", "kb_name": PUBLIC, "mode": "keyword"},
+        )
+        assert out.get("count", 0) > 0, out
+        assert {d["kb_name"] for d in out["discoveries"]} == {PUBLIC}
+        assert "secret-note" not in json.dumps(out)
+        assert "zebra behind the wall" not in json.dumps(out)
+
 
 class TestNamingAReadableKBAlongsideAPrivateOneBuysNothing:
     """The #180 rule (`_resolve_kb_names`): **every** KB the call names is

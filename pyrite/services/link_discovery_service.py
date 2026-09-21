@@ -138,11 +138,18 @@ class LinkDiscoveryService:
         limit: int = 10,
         mode: str = "keyword",
         exclude_linked: bool = True,
+        readable_kbs: set[str] | None = None,
     ) -> list[dict]:
         """Find semantically similar entries in other KBs, optionally excluding already-linked.
 
         Supports keyword, semantic, and hybrid modes. Falls back to keyword
         if semantic embeddings are not available.
+
+        `readable_kbs` is the caller's readable set, or None for an unscoped
+        caller (an operator API key, a global admin, the CLI). With
+        `target_kb` omitted the search spans every KB, so a candidate from a
+        KB outside that set is dropped here -- without it a caller who may
+        read one KB is handed another KB's entry as a suggestion (#186).
         """
         from .kb_service import KBService
         from .search_service import SearchService
@@ -224,6 +231,8 @@ class LinkDiscoveryService:
             rid = r.get("id", "")
             r_kb = r.get("kb_name", "")
 
+            if readable_kbs is not None and r_kb not in readable_kbs:
+                continue
             if rid == entry_id and r_kb == kb_name:
                 continue
             if exclude_linked and rid in existing_targets:
@@ -260,6 +269,7 @@ class LinkDiscoveryService:
         limit_per_entry: int = 3,
         mode: str = "keyword",
         exclude_linked: bool = True,
+        readable_kbs: set[str] | None = None,
     ) -> list[dict]:
         """Find all potential cross-KB links between two KBs.
 
@@ -283,6 +293,7 @@ class LinkDiscoveryService:
                 limit=limit_per_entry,
                 mode=mode,
                 exclude_linked=exclude_linked,
+                readable_kbs=readable_kbs,
             )
 
             for c in candidates:
