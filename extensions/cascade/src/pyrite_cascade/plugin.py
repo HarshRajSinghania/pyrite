@@ -185,7 +185,12 @@ class CascadePlugin:
                 "handler": self._mcp_timeline,
             }
             tools["cascade_network"] = {
-                "description": "Get actor/org/event connection network for a given entity",
+                "description": (
+                    "Get actor/org/event connection network for a given entity. "
+                    "At most `limit` outlinks and `limit` backlinks are returned "
+                    "(default 50 each); the response carries the true totals and "
+                    "`truncated`."
+                ),
                 "inputSchema": {
                     "type": "object",
                     "properties": {
@@ -194,6 +199,14 @@ class CascadePlugin:
                             "description": "Entry ID to get network for",
                         },
                         "kb_name": {"type": "string", "description": "KB name"},
+                        "limit": {
+                            "type": "integer",
+                            "description": "Max results per direction (default 50; 0 = no cap)",
+                        },
+                        "offset": {
+                            "type": "integer",
+                            "description": "Results to skip per direction (default 0)",
+                        },
                     },
                     "required": ["entry_id", "kb_name"],
                 },
@@ -361,7 +374,13 @@ class CascadePlugin:
         """
         db, should_close = self._get_db()
         try:
-            return query_network(db, args["kb_name"], args["entry_id"])
+            return query_network(
+                db,
+                args["kb_name"],
+                args["entry_id"],
+                limit=args.get("limit", 50),
+                offset=args.get("offset", 0),
+            )
         finally:
             if should_close:
                 db.close()

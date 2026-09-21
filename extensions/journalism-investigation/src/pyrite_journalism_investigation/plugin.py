@@ -238,7 +238,7 @@ class JournalismInvestigationPlugin:
                 "handler": self._mcp_entities,
             }
             tools["investigation_network"] = {
-                "description": "See all connections for a specific entity — who they're linked to, what events involve them, and through what relationships",
+                "description": "See all connections for a specific entity — who they're linked to, what events involve them, and through what relationships. Paged per direction: at most `limit` of each (default 50), with the true totals and `truncated` in the response",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
@@ -249,6 +249,14 @@ class JournalismInvestigationPlugin:
                         "kb_name": {
                             "type": "string",
                             "description": "KB name (auto-detected if omitted)",
+                        },
+                        "limit": {
+                            "type": "integer",
+                            "description": "Max results per direction (default 50; 0 = no cap)",
+                        },
+                        "offset": {
+                            "type": "integer",
+                            "description": "Results to skip per direction (default 0)",
                         },
                     },
                     "required": ["entry_id"],
@@ -827,7 +835,13 @@ class JournalismInvestigationPlugin:
     def _mcp_network(self, args: dict[str, Any]) -> dict[str, Any]:
         db, should_close = self._get_db()
         try:
-            return query_network(db, self._resolve_kb(args), args["entry_id"])
+            return query_network(
+                db,
+                self._resolve_kb(args),
+                args["entry_id"],
+                limit=args.get("limit", 50),
+                offset=args.get("offset", 0),
+            )
         finally:
             if should_close:
                 db.close()

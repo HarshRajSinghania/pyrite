@@ -124,19 +124,49 @@ def query_network(
     db: Any,
     kb_name: str,
     entry_id: str,
+    limit: int = 50,
+    offset: int = 0,
 ) -> dict[str, Any]:
-    """Get connection network for an entity."""
+    """Get connection network for an entity, paged in both directions.
+
+    `limit` and `offset` apply to each direction separately, and the response
+    carries the true totals plus `truncated` so a caller can tell what it did
+    not see. `limit <= 0` means "no cap", matching `PyriteDB.get_backlinks`.
+
+    The pages are cut here rather than in the storage layer: `get_outlinks` has
+    no pagination parameters, and sorting a page after the fact would let rows
+    repeat or vanish between pages. One deterministic order, then slice.
+    """
     entry = db.get_entry(entry_id, kb_name)
     if not entry:
         return {"error": f"Entry '{entry_id}' not found"}
 
-    outlinks = db.get_outlinks(entry_id, kb_name)
-    backlinks = db.get_backlinks(entry_id, kb_name)
+    def _ordered(links: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        # `or ""`, not `.get("title", "")`: `get_outlinks` LEFT JOINs the target
+        # entry, so a link to a page nobody has written yet has the key
+        # *present* with the value None, and a default never fires. Sorting
+        # None against a str raises TypeError, which turned an ordinary
+        # dangling wikilink into a failed tool call. `id` comes from the same
+        # join and gets the same treatment.
+        return sorted(links, key=lambda link: (link.get("title") or "", link.get("id") or ""))
+
+    outlinks = _ordered(db.get_outlinks(entry_id, kb_name))
+    backlinks = _ordered(db.get_backlinks(entry_id, kb_name))
+
+    total_outlinks, total_backlinks = len(outlinks), len(backlinks)
+    start = max(offset, 0)
+    window = slice(start, start + limit) if limit > 0 else slice(start, None)
+    page_outlinks, page_backlinks = outlinks[window], backlinks[window]
 
     return {
         "center": {"id": entry_id, "title": entry.get("title", "")},
-        "outlinks": outlinks,
-        "backlinks": backlinks,
+        "outlinks": page_outlinks,
+        "backlinks": page_backlinks,
+        "totals": {"outlinks": total_outlinks, "backlinks": total_backlinks},
+        "limit": limit,
+        "offset": start,
+        "truncated": (start + len(page_outlinks) < total_outlinks)
+        or (start + len(page_backlinks) < total_backlinks),
     }
 
 

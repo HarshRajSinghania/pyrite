@@ -56,6 +56,9 @@ class TestMCPToolRegistration:
         schema = tools["investigation_network"]["inputSchema"]
         assert "entry_id" in schema["required"]
         assert "kb_name" in schema["properties"]  # optional, auto-detected
+        # #63: both directions are paged, so the schema advertises how.
+        assert "limit" in schema["properties"]
+        assert "offset" in schema["properties"]
 
     def test_sources_tool_schema(self):
         plugin = JournalismInvestigationPlugin()
