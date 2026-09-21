@@ -19,11 +19,24 @@ removal happened to survive.
 The two tests are ordered on purpose: the first creates a client, the second
 inspects the directory AFTER the first test's fixture teardown has run.
 Asserting inside the first test would run before teardown and prove nothing.
+A single test cannot do this: the teardown it needs to observe is its own,
+and it has not run yet while the test body is executing.
+
+That ordering makes the pair the one thing a parallel run may not split.
+`_state` is module state, so under `pytest -n auto` the two can be handed to
+different worker PROCESSES and the second reads an empty dict -- a failure
+with nothing wrong in the code under test, seen on PR #260's CI on
+2026-09-21 while the same commit passed locally. `xdist_group` pins them to
+one worker; it needs `--dist loadgroup`, which `pyproject.toml` sets, or the
+marker does nothing at all.
 """
+
+import pytest
 
 _state: dict = {}
 
 
+@pytest.mark.xdist_group("make_client_teardown")
 def test_make_client_app_uses_a_second_connection(make_client):
     """Guard the premise: if this stops being true, the test below is vacuous."""
     client, config, db = make_client()
@@ -39,10 +52,16 @@ def test_make_client_app_uses_a_second_connection(make_client):
     _state["dir"] = config.settings.index_path.parent
 
 
+@pytest.mark.xdist_group("make_client_teardown")
 def test_no_wal_files_survive_the_fixture_teardown():
     """Runs after the test above, so `make_client`'s teardown has completed."""
     work_dir = _state.get("dir")
-    assert work_dir is not None, "the previous test did not run"
+    assert work_dir is not None, (
+        "the previous test did not run in this process -- both tests carry "
+        "`@pytest.mark.xdist_group('make_client_teardown')`, which only groups "
+        "them when pytest runs with `--dist loadgroup` (set in pyproject.toml's "
+        "addopts). If that option was dropped, this is that, not a real leak."
+    )
 
     leftovers = sorted(p.name for p in work_dir.iterdir())
     live = [n for n in leftovers if n.endswith("-wal") or n.endswith("-shm")]

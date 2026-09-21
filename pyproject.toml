@@ -103,7 +103,11 @@ include = ["pyrite", "pyrite.*"]
 [tool.pytest.ini_options]
 testpaths = ["tests", "extensions"]
 python_files = ["test_*.py"]
-addopts = "-v --tb=short -m 'not slow and not e2e'"
+# `--dist loadgroup` schedules tests marked `@pytest.mark.xdist_group(...)`
+# onto one worker; everything else is distributed exactly as plain `load`
+# does. Without it the marker is silently INERT, so a test that depends on
+# another test in the same module passes or fails by luck of the draw.
+addopts = "-v --tb=short -m 'not slow and not e2e' --dist loadgroup"
 markers = [
     "integration: tests requiring full environment setup (DB, indexing, network)",
     "api: REST API endpoint tests",

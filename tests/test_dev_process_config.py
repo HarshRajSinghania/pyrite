@@ -559,3 +559,41 @@ class TestInfraChangesRunTheFullMatrixOnAPR:
         # narrow a push's.
         matrix = str(ci["jobs"]["test"]["strategy"]["matrix"]["python-version"])
         assert "github.event_name == 'pull_request'" in matrix
+
+
+class TestGroupedTestsAreActuallyGrouped:
+    """`xdist_group` is inert unless pytest runs with `--dist loadgroup`.
+
+    A test that carries the marker and is NOT grouped fails at random,
+    depending on which worker pytest happened to hand it to -- the failure
+    mode that broke PR #260's CI on 2026-09-21 while the same commit passed
+    locally. The marker and the option are one change; this pins them
+    together so neither can be removed on its own.
+    """
+
+    def test_addopts_enables_loadgroup(self, pyproject):
+        addopts = pyproject["tool"]["pytest"]["ini_options"]["addopts"]
+        assert "--dist loadgroup" in addopts, (
+            "pytest must run with `--dist loadgroup`, or every "
+            "`@pytest.mark.xdist_group(...)` in the suite is silently "
+            f"ignored under -n auto. addopts is: {addopts!r}"
+        )
+
+    def test_every_xdist_group_marker_is_declared(self):
+        # A typo'd marker name ("xdist-group", "xdistgroup") is not an error
+        # in pytest; it is simply never applied.
+        import re
+
+        root = REPO / "tests"
+        used = set()
+        for path in root.rglob("test_*.py"):
+            for m in re.finditer(
+                r"@pytest\.mark\.xdist_group\(\s*[\"']([^\"']+)", path.read_text()
+            ):
+                used.add((path.name, m.group(1)))
+        # The coupled teardown pair is the reason the option exists; if it
+        # ever stops being grouped, this test says so.
+        assert ("test_make_client_closes_every_connection.py", "make_client_teardown") in used, (
+            "the two coupled tests in test_make_client_closes_every_connection.py "
+            f"must carry xdist_group('make_client_teardown'); found: {sorted(used)}"
+        )
