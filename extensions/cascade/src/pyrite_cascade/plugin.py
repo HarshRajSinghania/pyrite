@@ -283,8 +283,15 @@ class CascadePlugin:
     # MCP tool handlers
     # =========================================================================
 
-    def _mcp_actors(self, args: dict[str, Any]) -> dict[str, Any]:
-        """List actors with optional filters."""
+    def _mcp_actors(
+        self, args: dict[str, Any], *, readable_kbs: set[str] | None = None
+    ) -> dict[str, Any]:
+        """List actors with optional filters.
+
+        `kb_name` defaults to `cascade-research`; a scoped caller is served
+        that default only if they may read it, because the query carries the
+        readable set alongside the name (#223).
+        """
         db, should_close = self._get_db()
         kb_name = args.get("kb_name", "cascade-research")
         capture_lane = args.get("capture_lane", "").lower()
@@ -292,7 +299,9 @@ class CascadePlugin:
         min_importance = args.get("min_importance", 0)
 
         try:
-            results = db.list_entries(kb_name=kb_name, entry_type="actor", limit=500)
+            results = db.list_entries(
+                kb_name=kb_name, kb_names=readable_kbs, entry_type="actor", limit=500
+            )
             actors = []
             for r in results:
                 imp = int(r.get("importance", 5))
@@ -320,8 +329,14 @@ class CascadePlugin:
             if should_close:
                 db.close()
 
-    def _mcp_timeline(self, args: dict[str, Any]) -> dict[str, Any]:
-        """Query timeline events."""
+    def _mcp_timeline(
+        self, args: dict[str, Any], *, readable_kbs: set[str] | None = None
+    ) -> dict[str, Any]:
+        """Query timeline events.
+
+        `kb_name` defaults to `cascade-timeline`, served to a scoped caller
+        only if they may read it (#223).
+        """
         db, should_close = self._get_db()
         kb_name = args.get("kb_name", "cascade-timeline")
         from_date = args.get("from_date", "")
@@ -332,7 +347,9 @@ class CascadePlugin:
         limit = args.get("limit", 50)
 
         try:
-            results = db.list_entries(kb_name=kb_name, entry_type="timeline_event", limit=5000)
+            results = db.list_entries(
+                kb_name=kb_name, kb_names=readable_kbs, entry_type="timeline_event", limit=5000
+            )
             events = []
             for r in results:
                 imp = int(r.get("importance", 5))
@@ -385,8 +402,14 @@ class CascadePlugin:
             if should_close:
                 db.close()
 
-    def _mcp_solidarity_timeline(self, args: dict[str, Any]) -> dict[str, Any]:
-        """Query solidarity events."""
+    def _mcp_solidarity_timeline(
+        self, args: dict[str, Any], *, readable_kbs: set[str] | None = None
+    ) -> dict[str, Any]:
+        """Query solidarity events.
+
+        `kb_name` defaults to `cascade-solidarity`, served to a scoped caller
+        only if they may read it (#223).
+        """
         db, should_close = self._get_db()
         kb_name = args.get("kb_name", "cascade-solidarity")
         from_date = args.get("from_date", "")
@@ -397,7 +420,9 @@ class CascadePlugin:
         limit = args.get("limit", 50)
 
         try:
-            results = db.list_entries(kb_name=kb_name, entry_type="solidarity_event", limit=5000)
+            results = db.list_entries(
+                kb_name=kb_name, kb_names=readable_kbs, entry_type="solidarity_event", limit=5000
+            )
             events = []
             for r in results:
                 imp = int(r.get("importance", 5))
@@ -433,13 +458,19 @@ class CascadePlugin:
             if should_close:
                 db.close()
 
-    def _mcp_solidarity_infrastructure_types(self, args: dict[str, Any]) -> dict[str, Any]:
-        """List all infrastructure types with counts."""
+    def _mcp_solidarity_infrastructure_types(
+        self, args: dict[str, Any], *, readable_kbs: set[str] | None = None
+    ) -> dict[str, Any]:
+        """List all infrastructure types with counts.
+
+        `kb_name` defaults to `cascade-solidarity`, served to a scoped caller
+        only if they may read it (#223).
+        """
         db, should_close = self._get_db()
         kb_name = args.get("kb_name", "cascade-solidarity")
 
         try:
-            results = db.list_entries(kb_name=kb_name, limit=5000)
+            results = db.list_entries(kb_name=kb_name, kb_names=readable_kbs, limit=5000)
             type_counts: dict[str, int] = {}
             for r in results:
                 meta = parse_meta(r)
@@ -453,13 +484,19 @@ class CascadePlugin:
             if should_close:
                 db.close()
 
-    def _mcp_capture_lanes(self, args: dict[str, Any]) -> dict[str, Any]:
-        """List all capture lanes with counts."""
+    def _mcp_capture_lanes(
+        self, args: dict[str, Any], *, readable_kbs: set[str] | None = None
+    ) -> dict[str, Any]:
+        """List all capture lanes with counts.
+
+        With no `kb_name` this spans every KB, so the caller's readable set
+        narrows the query (#223) rather than the page afterwards.
+        """
         db, should_close = self._get_db()
         kb_name = args.get("kb_name")
 
         try:
-            results = db.list_entries(kb_name=kb_name, limit=5000)
+            results = db.list_entries(kb_name=kb_name, kb_names=readable_kbs, limit=5000)
             lane_counts: dict[str, int] = {}
             for r in results:
                 meta = parse_meta(r)

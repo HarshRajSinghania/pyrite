@@ -189,13 +189,6 @@ OPTIONAL_KB_TOOLS: dict[str, str] = {
                 "sw_standards",
                 "sw_validations",
             ),
-            "extensions/cascade": (
-                "cascade_actors",
-                "cascade_capture_lanes",
-                "cascade_timeline",
-                "solidarity_infrastructure_types",
-                "solidarity_timeline",
-            ),
             "extensions/encyclopedia": (
                 "wiki_quality_stats",
                 "wiki_review_queue",
