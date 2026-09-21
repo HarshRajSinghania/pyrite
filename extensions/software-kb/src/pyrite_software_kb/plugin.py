@@ -104,6 +104,17 @@ class SoftwareKBPlugin:
                             "enum": ["proposed", "accepted", "deprecated", "superseded"],
                             "description": "Filter by ADR status",
                         },
+                        "limit": {
+                            "type": "integer",
+                            "description": (
+                                "Max ADRs to return (default 50). Pass null for the full, "
+                                "unbounded list."
+                            ),
+                        },
+                        "offset": {
+                            "type": "integer",
+                            "description": "Skip this many ADRs before returning (default 0).",
+                        },
                     },
                     "required": [],
                 },
@@ -117,6 +128,17 @@ class SoftwareKBPlugin:
                         "kb_name": {"type": "string", "description": "KB name (optional)"},
                         "path": {"type": "string", "description": "Code path to search for"},
                         "name": {"type": "string", "description": "Component name to search for"},
+                        "limit": {
+                            "type": "integer",
+                            "description": (
+                                "Max components to return (default 50). Pass null for the "
+                                "full, unbounded list."
+                            ),
+                        },
+                        "offset": {
+                            "type": "integer",
+                            "description": "Skip this many components before returning (default 0).",
+                        },
                     },
                     "required": [],
                 },
@@ -140,6 +162,17 @@ class SoftwareKBPlugin:
                                 "deployment",
                             ],
                             "description": "Filter by category",
+                        },
+                        "limit": {
+                            "type": "integer",
+                            "description": (
+                                "Max standards to return (default 50). Pass null for the full, "
+                                "unbounded list."
+                            ),
+                        },
+                        "offset": {
+                            "type": "integer",
+                            "description": "Skip this many standards before returning (default 0).",
                         },
                     },
                     "required": [],
@@ -654,12 +687,19 @@ class SoftwareKBPlugin:
     # =========================================================================
 
     def _mcp_adrs(self, args: dict[str, Any]) -> dict[str, Any]:
-        """List ADRs."""
+        """List ADRs, bounded by `limit`/`offset`.
+
+        The status filter runs against the full result set and the bound is
+        applied after it (#233): limiting first would cut the list before the
+        filter and hand back the wrong page.
+        """
         import json
 
         db, should_close = self._get_db()
         kb_name = args.get("kb_name")
         status_filter = args.get("status")
+        limit = args.get("limit", DEFAULT_LIST_LIMIT)
+        offset = args.get("offset", 0)
 
         try:
             query = "SELECT * FROM entry WHERE entry_type = 'adr'"
@@ -692,19 +732,35 @@ class SoftwareKBPlugin:
                     }
                 )
 
-            return {"count": len(adrs), "adrs": adrs}
+            total = len(adrs)
+            page = adrs[offset : offset + limit] if limit is not None else adrs[offset:]
+
+            return {
+                "count": len(page),
+                "total": total,
+                "limit": limit,
+                "offset": offset,
+                "has_more": offset + len(page) < total,
+                "adrs": page,
+            }
         finally:
             if should_close:
                 db.close()
 
     def _mcp_component(self, args: dict[str, Any]) -> dict[str, Any]:
-        """Find component docs."""
+        """Find component docs, bounded by `limit`/`offset`.
+
+        `path`/`name` filtering runs first and the bound after it (#233), so a
+        page cannot lose a match that sorted past the cut.
+        """
         import json
 
         db, should_close = self._get_db()
         kb_name = args.get("kb_name")
         search_path = args.get("path", "")
         search_name = args.get("name", "")
+        limit = args.get("limit", DEFAULT_LIST_LIMIT)
+        offset = args.get("offset", 0)
 
         try:
             query = "SELECT * FROM entry WHERE entry_type = 'component'"
@@ -745,18 +801,33 @@ class SoftwareKBPlugin:
                         }
                     )
 
-            return {"count": len(results), "components": results}
+            total = len(results)
+            page = results[offset : offset + limit] if limit is not None else results[offset:]
+
+            return {
+                "count": len(page),
+                "total": total,
+                "limit": limit,
+                "offset": offset,
+                "has_more": offset + len(page) < total,
+                "components": page,
+            }
         finally:
             if should_close:
                 db.close()
 
     def _mcp_standards(self, args: dict[str, Any]) -> dict[str, Any]:
-        """List all standards (standard + programmatic_validation + development_convention)."""
+        """List standards, bounded by `limit`/`offset`.
+
+        The category filter runs first and the bound after it (#233).
+        """
         import json
 
         db, should_close = self._get_db()
         kb_name = args.get("kb_name")
         category_filter = args.get("category")
+        limit = args.get("limit", DEFAULT_LIST_LIMIT)
+        offset = args.get("offset", 0)
 
         try:
             query = "SELECT * FROM entry WHERE entry_type IN ('standard', 'programmatic_validation', 'development_convention')"
@@ -788,7 +859,17 @@ class SoftwareKBPlugin:
                     }
                 )
 
-            return {"count": len(standards), "standards": standards}
+            total = len(standards)
+            page = standards[offset : offset + limit] if limit is not None else standards[offset:]
+
+            return {
+                "count": len(page),
+                "total": total,
+                "limit": limit,
+                "offset": offset,
+                "has_more": offset + len(page) < total,
+                "standards": page,
+            }
         finally:
             if should_close:
                 db.close()

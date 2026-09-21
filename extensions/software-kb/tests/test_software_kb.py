@@ -4,6 +4,7 @@ import json
 import tempfile
 from pathlib import Path
 
+import pytest
 from pyrite_software_kb.entry_types import (
     ADR_STATUSES,
     BACKLOG_EFFORTS,
@@ -4593,5 +4594,144 @@ class TestPrioritizeAfterAnchor:
                     )
                 updates = {u["id"]: u["rank"] for u in result.get("updated", [])}
                 assert updates == {"a": 100, "b": 200}
+            finally:
+                db.close()
+
+
+SW_LIST_SURFACES = [
+    ("_mcp_adrs", "adrs", "status", "proposed"),
+    ("_mcp_component", "components", "path", "pyrite/x.py"),
+    ("_mcp_standards", "standards", "category", "coding"),
+]
+
+
+def _sw_entry(entry_id, entry_type, index):
+    """One row for the three list surfaces, with the metadata each reads."""
+    meta = {
+        "adr": {"adr_number": index},
+        "component": {"kind": "module", "path": "pyrite/x.py"},
+        "standard": {"category": "coding"},
+    }[entry_type]
+    return {
+        "id": entry_id,
+        "title": f"{entry_type} {index}",
+        "entry_type": entry_type,
+        "status": "proposed",
+        "meta": meta,
+        "created_at": f"2026-01-{(index % 28) + 1:02d}T00:00:00",
+    }
+
+
+class TestSwListCommandsAreBounded:
+    """`sw adrs`, `sw components` and `sw standards` bound their output (#238).
+
+    The properties #233 pinned for `sw backlog`, on the three surfaces that had
+    the same shape: a default bound, a paging walk covering every item once,
+    `has_more` exact at the boundary, and filtering applied *before* the bound.
+    """
+
+    @pytest.mark.parametrize("handler,key,filter_arg,filter_value", SW_LIST_SURFACES)
+    def test_the_default_bound_is_fifty(self, handler, key, filter_arg, filter_value):
+        entry_type = "adr" if key == "adrs" else key[:-1]
+        with tempfile.TemporaryDirectory() as tmpdir:
+            entries = [_sw_entry(f"e-{i:03d}", entry_type, i) for i in range(75)]
+            db = _make_test_db(tmpdir, entries=entries)
+            try:
+                result = getattr(_make_plugin_with_db(db), handler)({"kb_name": "test"})
+                assert len(result[key]) == 50, "the default bound is 50, as elsewhere"
+                assert result["total"] == 75
+                assert result["count"] == len(result[key])
+                assert result["has_more"] is True
+            finally:
+                db.close()
+
+    @pytest.mark.parametrize("handler,key,filter_arg,filter_value", SW_LIST_SURFACES)
+    def test_paging_covers_every_item_once(self, handler, key, filter_arg, filter_value):
+        entry_type = "adr" if key == "adrs" else key[:-1]
+        with tempfile.TemporaryDirectory() as tmpdir:
+            entries = [_sw_entry(f"e-{i:03d}", entry_type, i) for i in range(23)]
+            db = _make_test_db(tmpdir, entries=entries)
+            try:
+                plugin = _make_plugin_with_db(db)
+                seen: list[str] = []
+                offset = 0
+                for _ in range(10):
+                    result = getattr(plugin, handler)(
+                        {"kb_name": "test", "limit": 10, "offset": offset}
+                    )
+                    seen.extend(item["id"] for item in result[key])
+                    if not result["has_more"]:
+                        break
+                    offset += 10
+                assert sorted(seen) == sorted(e["id"] for e in entries)
+                assert len(seen) == len(set(seen)), "no duplicates across pages"
+            finally:
+                db.close()
+
+    @pytest.mark.parametrize("handler,key,filter_arg,filter_value", SW_LIST_SURFACES)
+    def test_has_more_is_exact_at_the_boundary(self, handler, key, filter_arg, filter_value):
+        entry_type = "adr" if key == "adrs" else key[:-1]
+        with tempfile.TemporaryDirectory() as tmpdir:
+            entries = [_sw_entry(f"e-{i:03d}", entry_type, i) for i in range(10)]
+            db = _make_test_db(tmpdir, entries=entries)
+            try:
+                plugin = _make_plugin_with_db(db)
+                exact = getattr(plugin, handler)({"kb_name": "test", "limit": 10, "offset": 0})
+                assert exact["has_more"] is False
+
+                short = getattr(plugin, handler)({"kb_name": "test", "limit": 9, "offset": 0})
+                assert short["has_more"] is True
+
+                past_end = getattr(plugin, handler)({"kb_name": "test", "limit": 5, "offset": 20})
+                assert past_end[key] == []
+                assert past_end["has_more"] is False
+            finally:
+                db.close()
+
+    @pytest.mark.parametrize("handler,key,filter_arg,filter_value", SW_LIST_SURFACES)
+    def test_limit_none_returns_everything(self, handler, key, filter_arg, filter_value):
+        """`--limit 0` on the CLI passes None: the full, unbounded list."""
+        entry_type = "adr" if key == "adrs" else key[:-1]
+        with tempfile.TemporaryDirectory() as tmpdir:
+            entries = [_sw_entry(f"e-{i:03d}", entry_type, i) for i in range(60)]
+            db = _make_test_db(tmpdir, entries=entries)
+            try:
+                result = getattr(_make_plugin_with_db(db), handler)(
+                    {"kb_name": "test", "limit": None}
+                )
+                assert len(result[key]) == 60
+                assert result["total"] == 60
+                assert result["has_more"] is False
+            finally:
+                db.close()
+
+    @pytest.mark.parametrize("handler,key,filter_arg,filter_value", SW_LIST_SURFACES)
+    def test_the_filter_is_applied_before_the_bound(self, handler, key, filter_arg, filter_value):
+        """Filter first, bound second -- the other order returns the wrong page.
+
+        The five non-matching rows are created *later* than the matching ones,
+        so they sort first. A bound-then-filter with limit=3 would look at
+        three non-matching rows, discard them, and report nothing; filtering
+        first reports the true total of five.
+        """
+        entry_type = "adr" if key == "adrs" else key[:-1]
+        with tempfile.TemporaryDirectory() as tmpdir:
+            entries = [_sw_entry(f"match-{i}", entry_type, i) for i in range(5)]
+            others = [_sw_entry(f"other-{i}", entry_type, i + 20) for i in range(5)]
+            for other in others:
+                if entry_type == "adr":
+                    other["status"] = "accepted"
+                elif entry_type == "component":
+                    other["meta"]["path"] = "elsewhere/z.py"
+                else:
+                    other["meta"]["category"] = "testing"
+            db = _make_test_db(tmpdir, entries=entries + others)
+            try:
+                result = getattr(_make_plugin_with_db(db), handler)(
+                    {"kb_name": "test", filter_arg: filter_value, "limit": 3}
+                )
+                assert result["total"] == 5, "the bound applies to the filtered set"
+                assert len(result[key]) == 3
+                assert {item["id"] for item in result[key]} <= {f"match-{i}" for i in range(5)}
             finally:
                 db.close()

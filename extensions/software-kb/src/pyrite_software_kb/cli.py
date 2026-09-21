@@ -92,10 +92,19 @@ def _json_output(items: list[dict]) -> None:
 @sw_app.command("adrs")
 def sw_adrs(
     status: str | None = typer.Option(None, "--status", "-s", help="Filter by status"),
+    limit: int | None = typer.Option(None, "--limit", help="Max ADRs to return (default 50)"),
+    offset: int = typer.Option(0, "--offset", help="Skip this many ADRs before returning"),
     kb_name: str | None = typer.Option(None, "--kb", "-k", help="KB name"),
     fmt: str = typer.Option("json", "--format", "-f", help="Output format: json, rich"),
 ):
-    """List Architecture Decision Records."""
+    """List Architecture Decision Records.
+
+    Bounded by default like `sw backlog`: 50 ADRs, with --limit/--offset to
+    page through the rest and --limit 0 for the full, unbounded list.
+    """
+    from .plugin import DEFAULT_LIST_LIMIT
+
+    effective_limit = DEFAULT_LIST_LIMIT if limit is None else (None if limit <= 0 else limit)
     config = load_config()
     db = PyriteDB(config.settings.index_path)
 
@@ -108,6 +117,10 @@ def sw_adrs(
                 for r in rows
                 if (r.get("status") or r["_meta"].get("status", "proposed")) == status
             ]
+
+        # Bound AFTER filtering, never before (#233): limiting first would cut
+        # the list before the filter and return the wrong page.
+        rows = rows[offset : offset + effective_limit] if effective_limit else rows[offset:]
 
         if not rows:
             if fmt == "json":
@@ -467,10 +480,15 @@ def sw_prioritize(
 @sw_app.command("standards")
 def sw_standards(
     category: str | None = typer.Option(None, "--category", "-c", help="Filter by category"),
+    limit: int | None = typer.Option(None, "--limit", help="Max standards to return (default 50)"),
+    offset: int = typer.Option(0, "--offset", help="Skip this many standards before returning"),
     kb_name: str | None = typer.Option(None, "--kb", "-k", help="KB name"),
     fmt: str = typer.Option("json", "--format", "-f", help="Output format: json, rich"),
 ):
     """List all standards (standard + programmatic_validation + development_convention). [deprecated: use validations/conventions]"""
+    from .plugin import DEFAULT_LIST_LIMIT
+
+    effective_limit = DEFAULT_LIST_LIMIT if limit is None else (None if limit <= 0 else limit)
     config = load_config()
     db = PyriteDB(config.settings.index_path)
 
@@ -481,6 +499,9 @@ def sw_standards(
 
         if category:
             rows = [r for r in rows if r["_meta"].get("category", "") == category]
+
+        # Bound AFTER filtering (#233), as on every sibling command.
+        rows = rows[offset : offset + effective_limit] if effective_limit else rows[offset:]
 
         if not rows:
             if fmt == "json":
@@ -1207,10 +1228,19 @@ def sw_log_cmd(
 @sw_app.command("components")
 def sw_components(
     kind: str | None = typer.Option(None, "--kind", "-t", help="Filter by kind"),
+    limit: int | None = typer.Option(None, "--limit", help="Max components to return (default 50)"),
+    offset: int = typer.Option(0, "--offset", help="Skip this many components before returning"),
     kb_name: str | None = typer.Option(None, "--kb", "-k", help="KB name"),
     fmt: str = typer.Option("json", "--format", "-f", help="Output format: json, rich"),
 ):
-    """List component documentation."""
+    """List component documentation.
+
+    Bounded by default like `sw backlog`: 50 components, with --limit/--offset
+    to page and --limit 0 for the full list.
+    """
+    from .plugin import DEFAULT_LIST_LIMIT
+
+    effective_limit = DEFAULT_LIST_LIMIT if limit is None else (None if limit <= 0 else limit)
     config = load_config()
     db = PyriteDB(config.settings.index_path)
 
@@ -1219,6 +1249,9 @@ def sw_components(
 
         if kind:
             rows = [r for r in rows if r["_meta"].get("kind", "") == kind]
+
+        # Bound AFTER filtering (#233), as on every sibling command.
+        rows = rows[offset : offset + effective_limit] if effective_limit else rows[offset:]
 
         if not rows:
             if fmt == "json":
