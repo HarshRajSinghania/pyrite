@@ -7,7 +7,6 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
-from ..config import load_config
 from ..exceptions import PyriteError
 from ..services.task_service import TaskService
 from ..storage.database import PyriteDB
@@ -46,9 +45,16 @@ def _task_error(exc: Exception, fmt: str = "rich") -> None:
 
 
 def _get_service() -> tuple[TaskService, PyriteDB]:
-    """Create TaskService and return (service, db) for cleanup."""
-    config = load_config()
-    db = PyriteDB(config.settings.index_path)
+    """Create TaskService and return (service, db) for cleanup.
+
+    Goes through the shared loader so KBs registered in the database
+    (``kb create``, ``kb add``) are merged into the config first. Reading the
+    YAML config directly made those KBs invisible here: ``kb list`` showed
+    them, and ``task create -k <kb>`` answered KB_NOT_FOUND (#245).
+    """
+    from .context import get_config_and_db
+
+    config, db = get_config_and_db()
     return TaskService(config, db), db
 
 

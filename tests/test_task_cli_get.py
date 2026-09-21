@@ -50,7 +50,7 @@ def task_cli_env():
         task_id = created["entry_id"]
         db.close()
 
-        with patch("pyrite.cli.task_commands.load_config", return_value=config):
+        with patch("pyrite.cli.context.load_config", return_value=config):
             yield {"config": config, "task_id": task_id}
 
 

@@ -42,7 +42,7 @@ def task_cli_env():
             name="test-tasks", kb_type="task", path=str(tasks_path), description="Test task KB"
         )
         db.close()
-        with patch("pyrite.cli.task_commands.load_config", return_value=config):
+        with patch("pyrite.cli.context.load_config", return_value=config):
             yield {"config": config}
 
 
