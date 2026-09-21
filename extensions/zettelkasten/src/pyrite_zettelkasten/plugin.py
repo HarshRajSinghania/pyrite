@@ -138,8 +138,19 @@ class ZettelkastenPlugin:
     # MCP tool handlers
     # =========================================================================
 
-    def _mcp_inbox(self, args: dict[str, Any]) -> dict[str, Any]:
-        """List unprocessed fleeting notes."""
+    def _mcp_inbox(
+        self, args: dict[str, Any], *, readable_kbs: set[str] | None = None
+    ) -> dict[str, Any]:
+        """List unprocessed fleeting notes.
+
+        `kb_name` is optional, so a call that omits it spans every KB -- which
+        the MCP chokepoint refuses outright for a scoped caller. The readable
+        set goes down to the storage query instead (#223): `list_entries`
+        bounds with `limit`, so narrowing the page afterwards would hand a
+        scoped caller a short one. `kb_names` already means "nothing" for an
+        empty set (`_kb_names_clause` emits `1 = 0`), so a caller who may read
+        nothing gets nothing rather than everything.
+        """
         import json
 
         db, should_close = self._get_db()
@@ -148,7 +159,12 @@ class ZettelkastenPlugin:
         try:
             # list, not search: "*" is not a valid FTS5 query, so this raised
             # on every call.
-            results = db.list_entries(kb_name=kb_name, entry_type="zettel", limit=500)
+            results = db.list_entries(
+                kb_name=kb_name,
+                kb_names=readable_kbs,
+                entry_type="zettel",
+                limit=500,
+            )
             inbox = []
             for r in results:
                 meta = r.get("metadata") or {}

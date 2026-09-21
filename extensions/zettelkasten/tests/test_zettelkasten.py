@@ -404,3 +404,74 @@ class TestCoreIntegration:
             assert get_inverse_relation("owns") == "owned_by"
         finally:
             reg_module._registry = old
+
+
+class _RecordingDB:
+    """Records the storage call `_mcp_inbox` makes, and answers it."""
+
+    def __init__(self, rows=None):
+        self.calls: list[dict] = []
+        self._rows = rows or []
+
+    def list_entries(self, **kwargs):
+        self.calls.append(kwargs)
+        return list(self._rows)
+
+    def close(self):
+        pass
+
+
+def _inbox_plugin(rows=None):
+    plugin = ZettelkastenPlugin()
+    db = _RecordingDB(rows)
+    plugin._get_db = lambda: (db, False)
+    return plugin, db
+
+
+class TestInboxNarrowsToTheReadableSet:
+    """`zettel_inbox` hands the caller's readable set to the storage query (#223).
+
+    `kb_name` is optional, so a call that omits it spans every KB, and the MCP
+    chokepoint refuses such a call for a scoped caller rather than serving the
+    index. The narrowing belongs in `list_entries(kb_names=...)` -- the storage
+    layer's empty-set rule (`1 = 0`, never "no filter") is asserted with the
+    backend, not here. What these tests pin is that this handler passes the set
+    through untouched and does not filter the page afterwards, which would
+    return a short page under the storage limit.
+    """
+
+    def test_no_kb_name_is_narrowed_by_the_readable_set(self):
+        plugin, db = _inbox_plugin()
+        plugin._mcp_inbox({}, readable_kbs={"public-kb"})
+        assert db.calls[0]["kb_names"] == {"public-kb"}
+        assert db.calls[0]["kb_name"] is None
+
+    def test_no_kb_name_and_no_set_is_unscoped(self):
+        plugin, db = _inbox_plugin()
+        plugin._mcp_inbox({})
+        assert db.calls[0]["kb_names"] is None
+
+    def test_an_empty_readable_set_is_passed_as_empty_not_dropped(self):
+        plugin, db = _inbox_plugin()
+        plugin._mcp_inbox({}, readable_kbs=set())
+        assert db.calls[0]["kb_names"] == set()
+
+    def test_a_named_kb_is_still_passed_through(self):
+        plugin, db = _inbox_plugin()
+        plugin._mcp_inbox({"kb_name": "public-kb"}, readable_kbs={"public-kb"})
+        assert db.calls[0]["kb_name"] == "public-kb"
+
+    def test_the_page_is_not_filtered_after_the_query(self):
+        """A short page is the symptom of post-filtering, so the handler
+        returns exactly the rows the narrowed query gave it."""
+        row = {
+            "id": "z1",
+            "title": "Fleeting note",
+            "kb_name": "public-kb",
+            "metadata": {"zettel_type": "fleeting", "processing_stage": "capture"},
+        }
+        plugin, db = _inbox_plugin(rows=[row])
+        out = plugin._mcp_inbox({}, readable_kbs={"public-kb"})
+        assert out["count"] == 1
+        assert out["inbox"][0]["id"] == "z1"
+        assert db.calls[0]["kb_names"] == {"public-kb"}
