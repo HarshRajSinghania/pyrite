@@ -173,20 +173,6 @@ OPTIONAL_KB_TOOLS: dict[str, str] = {
                 "investigation_status",
                 "investigation_timeline",
             ),
-            "extensions/software-kb": (
-                "sw_adrs",
-                "sw_backlog",
-                "sw_board",
-                "sw_component",
-                "sw_conventions",
-                "sw_create_adr",
-                "sw_epics",
-                "sw_milestones",
-                "sw_pull_next",
-                "sw_review_queue",
-                "sw_standards",
-                "sw_validations",
-            ),
         }.items()
         for name in names
     },

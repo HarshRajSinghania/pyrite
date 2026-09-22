@@ -5,6 +5,7 @@ from datetime import UTC
 from typing import Any, ClassVar
 
 from pyrite.plugins.capabilities import Capability
+from pyrite.plugins.scoping import kb_scope_clause
 from pyrite.schema import generate_entry_id
 
 from .entry_types import (
@@ -686,7 +687,9 @@ class SoftwareKBPlugin:
     # MCP tool handlers
     # =========================================================================
 
-    def _mcp_adrs(self, args: dict[str, Any]) -> dict[str, Any]:
+    def _mcp_adrs(
+        self, args: dict[str, Any], *, readable_kbs: set[str] | None = None
+    ) -> dict[str, Any]:
         """List ADRs, bounded by `limit`/`offset`.
 
         The status filter runs against the full result set and the bound is
@@ -703,10 +706,9 @@ class SoftwareKBPlugin:
 
         try:
             query = "SELECT * FROM entry WHERE entry_type = 'adr'"
-            params: list = []
-            if kb_name:
-                query += " AND kb_name = ?"
-                params.append(kb_name)
+            clause, scope_params = kb_scope_clause("kb_name", kb_name, readable_kbs)
+            query += clause
+            params = list(scope_params)
             query += " ORDER BY created_at DESC"
 
             rows = db._raw_conn.execute(query, params).fetchall()
@@ -747,7 +749,9 @@ class SoftwareKBPlugin:
             if should_close:
                 db.close()
 
-    def _mcp_component(self, args: dict[str, Any]) -> dict[str, Any]:
+    def _mcp_component(
+        self, args: dict[str, Any], *, readable_kbs: set[str] | None = None
+    ) -> dict[str, Any]:
         """Find component docs, bounded by `limit`/`offset`.
 
         `path`/`name` filtering runs first and the bound after it (#233), so a
@@ -764,10 +768,9 @@ class SoftwareKBPlugin:
 
         try:
             query = "SELECT * FROM entry WHERE entry_type = 'component'"
-            params: list = []
-            if kb_name:
-                query += " AND kb_name = ?"
-                params.append(kb_name)
+            clause, scope_params = kb_scope_clause("kb_name", kb_name, readable_kbs)
+            query += clause
+            params = list(scope_params)
 
             rows = db._raw_conn.execute(query, params).fetchall()
             results = []
@@ -816,7 +819,9 @@ class SoftwareKBPlugin:
             if should_close:
                 db.close()
 
-    def _mcp_standards(self, args: dict[str, Any]) -> dict[str, Any]:
+    def _mcp_standards(
+        self, args: dict[str, Any], *, readable_kbs: set[str] | None = None
+    ) -> dict[str, Any]:
         """List standards, bounded by `limit`/`offset`.
 
         The category filter runs first and the bound after it (#233).
@@ -831,10 +836,9 @@ class SoftwareKBPlugin:
 
         try:
             query = "SELECT * FROM entry WHERE entry_type IN ('standard', 'programmatic_validation', 'development_convention')"
-            params: list = []
-            if kb_name:
-                query += " AND kb_name = ?"
-                params.append(kb_name)
+            clause, scope_params = kb_scope_clause("kb_name", kb_name, readable_kbs)
+            query += clause
+            params = list(scope_params)
 
             rows = db._raw_conn.execute(query, params).fetchall()
             standards = []
@@ -874,7 +878,9 @@ class SoftwareKBPlugin:
             if should_close:
                 db.close()
 
-    def _mcp_validations(self, args: dict[str, Any]) -> dict[str, Any]:
+    def _mcp_validations(
+        self, args: dict[str, Any], *, readable_kbs: set[str] | None = None
+    ) -> dict[str, Any]:
         """List programmatic validations."""
         import json
 
@@ -884,10 +890,9 @@ class SoftwareKBPlugin:
 
         try:
             query = "SELECT * FROM entry WHERE entry_type = 'programmatic_validation'"
-            params: list = []
-            if kb_name:
-                query += " AND kb_name = ?"
-                params.append(kb_name)
+            clause, scope_params = kb_scope_clause("kb_name", kb_name, readable_kbs)
+            query += clause
+            params = list(scope_params)
 
             rows = db._raw_conn.execute(query, params).fetchall()
             items = []
@@ -917,7 +922,9 @@ class SoftwareKBPlugin:
             if should_close:
                 db.close()
 
-    def _mcp_conventions(self, args: dict[str, Any]) -> dict[str, Any]:
+    def _mcp_conventions(
+        self, args: dict[str, Any], *, readable_kbs: set[str] | None = None
+    ) -> dict[str, Any]:
         """List development conventions."""
         import json
 
@@ -927,10 +934,9 @@ class SoftwareKBPlugin:
 
         try:
             query = "SELECT * FROM entry WHERE entry_type = 'development_convention'"
-            params: list = []
-            if kb_name:
-                query += " AND kb_name = ?"
-                params.append(kb_name)
+            clause, scope_params = kb_scope_clause("kb_name", kb_name, readable_kbs)
+            query += clause
+            params = list(scope_params)
 
             rows = db._raw_conn.execute(query, params).fetchall()
             items = []
@@ -958,7 +964,9 @@ class SoftwareKBPlugin:
             if should_close:
                 db.close()
 
-    def _mcp_backlog(self, args: dict[str, Any]) -> dict[str, Any]:
+    def _mcp_backlog(
+        self, args: dict[str, Any], *, readable_kbs: set[str] | None = None
+    ) -> dict[str, Any]:
         """List backlog items with optional sort, epic filter, and grouping.
 
         `limit`/`offset` bound the returned `items` list. Filtering by
@@ -995,10 +1003,9 @@ class SoftwareKBPlugin:
                         epic_subtask_ids.add(link["id"])
 
             query = "SELECT * FROM entry WHERE entry_type = 'backlog_item'"
-            params: list = []
-            if kb_name:
-                query += " AND kb_name = ?"
-                params.append(kb_name)
+            clause, scope_params = kb_scope_clause("kb_name", kb_name, readable_kbs)
+            query += clause
+            params = list(scope_params)
             query += " ORDER BY created_at DESC"
 
             rows = db._raw_conn.execute(query, params).fetchall()
@@ -1133,7 +1140,9 @@ class SoftwareKBPlugin:
             )
         return result
 
-    def _mcp_epics(self, args: dict[str, Any]) -> dict[str, Any]:
+    def _mcp_epics(
+        self, args: dict[str, Any], *, readable_kbs: set[str] | None = None
+    ) -> dict[str, Any]:
         """List epics with subtask progress rollup."""
         import json
 
@@ -1143,10 +1152,9 @@ class SoftwareKBPlugin:
 
         try:
             query = "SELECT * FROM entry WHERE entry_type = 'backlog_item'"
-            params: list = []
-            if kb_name:
-                query += " AND kb_name = ?"
-                params.append(kb_name)
+            clause, scope_params = kb_scope_clause("kb_name", kb_name, readable_kbs)
+            query += clause
+            params = list(scope_params)
             query += " ORDER BY created_at DESC"
 
             rows = db._raw_conn.execute(query, params).fetchall()
@@ -1343,7 +1351,9 @@ class SoftwareKBPlugin:
             if should_close:
                 db.close()
 
-    def _mcp_milestones(self, args: dict[str, Any]) -> dict[str, Any]:
+    def _mcp_milestones(
+        self, args: dict[str, Any], *, readable_kbs: set[str] | None = None
+    ) -> dict[str, Any]:
         """List milestones with completion stats."""
         import json
 
@@ -1353,10 +1363,9 @@ class SoftwareKBPlugin:
 
         try:
             query = "SELECT * FROM entry WHERE entry_type = 'milestone'"
-            params: list = []
-            if kb_name:
-                query += " AND kb_name = ?"
-                params.append(kb_name)
+            clause, scope_params = kb_scope_clause("kb_name", kb_name, readable_kbs)
+            query += clause
+            params = list(scope_params)
             query += " ORDER BY created_at DESC"
 
             rows = db._raw_conn.execute(query, params).fetchall()
@@ -1585,7 +1594,9 @@ class SoftwareKBPlugin:
             if should_close:
                 db.close()
 
-    def _mcp_board(self, args: dict[str, Any]) -> dict[str, Any]:
+    def _mcp_board(
+        self, args: dict[str, Any], *, readable_kbs: set[str] | None = None
+    ) -> dict[str, Any]:
         """View kanban board.
 
         Each lane's `count` is always the true total in that lane; `items`
@@ -1618,10 +1629,9 @@ class SoftwareKBPlugin:
 
             # Query all backlog items
             query = "SELECT * FROM entry WHERE entry_type = 'backlog_item'"
-            params: list = []
-            if kb_name:
-                query += " AND kb_name = ?"
-                params.append(kb_name)
+            clause, scope_params = kb_scope_clause("kb_name", kb_name, readable_kbs)
+            query += clause
+            params = list(scope_params)
 
             rows = db._raw_conn.execute(query, params).fetchall()
 
@@ -1677,7 +1687,9 @@ class SoftwareKBPlugin:
             if should_close:
                 db.close()
 
-    def _mcp_create_adr(self, args: dict[str, Any]) -> dict[str, Any]:
+    def _mcp_create_adr(
+        self, args: dict[str, Any], *, readable_kbs: set[str] | None = None
+    ) -> dict[str, Any]:
         """Create a new ADR with auto-numbering."""
         import json
 
@@ -1687,10 +1699,9 @@ class SoftwareKBPlugin:
         try:
             # Find next ADR number
             query = "SELECT * FROM entry WHERE entry_type = 'adr'"
-            params: list = []
-            if kb_name:
-                query += " AND kb_name = ?"
-                params.append(kb_name)
+            clause, scope_params = kb_scope_clause("kb_name", kb_name, readable_kbs)
+            query += clause
+            params = list(scope_params)
             rows = db._raw_conn.execute(query, params).fetchall()
 
             max_num = 0
@@ -1734,7 +1745,9 @@ class SoftwareKBPlugin:
             if should_close:
                 db.close()
 
-    def _mcp_review_queue(self, args: dict[str, Any]) -> dict[str, Any]:
+    def _mcp_review_queue(
+        self, args: dict[str, Any], *, readable_kbs: set[str] | None = None
+    ) -> dict[str, Any]:
         """View items in review status, sorted by wait time."""
         import json
         from pathlib import Path
@@ -1746,10 +1759,9 @@ class SoftwareKBPlugin:
 
         try:
             query = "SELECT * FROM entry WHERE entry_type = 'backlog_item'"
-            params: list = []
-            if kb_name:
-                query += " AND kb_name = ?"
-                params.append(kb_name)
+            clause, scope_params = kb_scope_clause("kb_name", kb_name, readable_kbs)
+            query += clause
+            params = list(scope_params)
             query += " ORDER BY updated_at ASC"
 
             rows = db._raw_conn.execute(query, params).fetchall()
@@ -2346,7 +2358,9 @@ class SoftwareKBPlugin:
             if should_close:
                 db.close()
 
-    def _mcp_pull_next(self, args: dict[str, Any]) -> dict[str, Any]:
+    def _mcp_pull_next(
+        self, args: dict[str, Any], *, readable_kbs: set[str] | None = None
+    ) -> dict[str, Any]:
         """Recommend next work item based on priority and WIP limits."""
         import json
         from pathlib import Path
@@ -2374,10 +2388,9 @@ class SoftwareKBPlugin:
 
             # Count in_progress items and find WIP limit
             ip_query = "SELECT COUNT(*) as cnt FROM entry WHERE entry_type = 'backlog_item'"
-            ip_params: list = []
-            if kb_name:
-                ip_query += " AND kb_name = ?"
-                ip_params.append(kb_name)
+            ip_clause, ip_scope = kb_scope_clause("kb_name", kb_name, readable_kbs)
+            ip_query += ip_clause
+            ip_params = list(ip_scope)
             ip_query += " AND status = 'in_progress'"
             ip_count = db._raw_conn.execute(ip_query, ip_params).fetchone()["cnt"]
 
@@ -2404,10 +2417,9 @@ class SoftwareKBPlugin:
 
             # Query accepted items, rank by priority then created_at
             query = "SELECT * FROM entry WHERE entry_type = 'backlog_item'"
-            params: list = []
-            if kb_name:
-                query += " AND kb_name = ?"
-                params.append(kb_name)
+            clause, scope_params = kb_scope_clause("kb_name", kb_name, readable_kbs)
+            query += clause
+            params = list(scope_params)
             query += " ORDER BY created_at ASC"
 
             rows = db._raw_conn.execute(query, params).fetchall()

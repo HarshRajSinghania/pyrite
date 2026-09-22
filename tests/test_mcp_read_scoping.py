@@ -522,21 +522,29 @@ class TestOmittingTheKBNameIsNotAWayIn:
         assert out["count"] == len(entries), "count must be computed after filtering"
 
     def test_a_tool_that_cannot_filter_is_refused_not_served(self, env):
-        """Fail closed. `sw_board` and its 44 siblings live in extensions,
-        take no readable set, and span every KB when `kb_name` is omitted.
-        Refusing them is what keeps this release safe without editing six
-        extensions; serving them would be the bug."""
+        """Fail closed, against a set of tools that is deliberately shrinking.
+
+        The six extensions are being taught to filter by the readable set one
+        at a time (#223): social, zettelkasten, encyclopedia, cascade and
+        software-kb have landed, so the example here now comes from
+        `journalism-investigation`, the one extension left. A tool that takes
+        no readable set and spans every KB when `kb_name` is omitted is
+        refused, not served; once a tool filters, its own tests cover it and
+        this one moves on to the next extension still in the list.
+        """
         server = env["server_for_tier"]("read")
-        if "sw_board" not in server.tools:
-            pytest.skip("software-kb extension not installed")
-        out = server._dispatch_tool("sw_board", {}, client_id="peer", readable_kbs={PUBLIC})
+        if "investigation_entities" not in server.tools:
+            pytest.skip("journalism-investigation extension not installed")
+        out = server._dispatch_tool(
+            "investigation_entities", {}, client_id="peer", readable_kbs={PUBLIC}
+        )
         assert out["error_code"] == "NOT_FOUND"
 
     def test_the_same_tool_still_works_for_an_unscoped_caller(self, env):
         server = env["server_for_tier"]("read")
-        if "sw_board" not in server.tools:
-            pytest.skip("software-kb extension not installed")
-        out = server._dispatch_tool("sw_board", {}, client_id="operator")
+        if "investigation_entities" not in server.tools:
+            pytest.skip("journalism-investigation extension not installed")
+        out = server._dispatch_tool("investigation_entities", {}, client_id="operator")
         assert out.get("error_code") != "NOT_FOUND"
 
 
