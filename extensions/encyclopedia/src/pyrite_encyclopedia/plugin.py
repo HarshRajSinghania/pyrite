@@ -4,6 +4,7 @@ from collections.abc import Callable
 from typing import Any, ClassVar
 
 from pyrite.plugins.capabilities import Capability
+from pyrite.plugins.scoping import kb_scope_clause
 
 from .entry_types import ArticleEntry, TalkPageEntry
 from .preset import ENCYCLOPEDIA_PRESET
@@ -178,8 +179,15 @@ class EncyclopediaPlugin:
     # MCP tool handlers
     # =========================================================================
 
-    def _mcp_quality_stats(self, args: dict[str, Any]) -> dict[str, Any]:
-        """Get quality distribution and review queue stats."""
+    def _mcp_quality_stats(
+        self, args: dict[str, Any], *, readable_kbs: set[str] | None = None
+    ) -> dict[str, Any]:
+        """Get quality distribution and review queue stats.
+
+        With no `kb_name` this spans every KB, so the caller's readable set
+        narrows the query (#223): the counts are counts of what the caller may
+        actually read, not of the whole index.
+        """
         import json
 
         db, should_close = self._get_db()
@@ -187,10 +195,9 @@ class EncyclopediaPlugin:
 
         try:
             query = "SELECT * FROM entry WHERE entry_type = 'article'"
-            params: list = []
-            if kb_name:
-                query += " AND kb_name = ?"
-                params.append(kb_name)
+            clause, scope_params = kb_scope_clause("kb_name", kb_name, readable_kbs)
+            query += clause
+            params = list(scope_params)
 
             rows = db._raw_conn.execute(query, params).fetchall()
 
@@ -219,8 +226,16 @@ class EncyclopediaPlugin:
             if should_close:
                 db.close()
 
-    def _mcp_review_queue(self, args: dict[str, Any]) -> dict[str, Any]:
-        """Get articles under review."""
+    def _mcp_review_queue(
+        self, args: dict[str, Any], *, readable_kbs: set[str] | None = None
+    ) -> dict[str, Any]:
+        """Get articles under review.
+
+        With no `kb_name` this spans every KB, so the caller's readable set
+        narrows the query (#223) rather than the page afterwards -- the
+        handler stops at `limit`, so filtering after it would return a short
+        queue to exactly the callers this exists for.
+        """
         import json
 
         db, should_close = self._get_db()
@@ -229,10 +244,9 @@ class EncyclopediaPlugin:
 
         try:
             query = "SELECT * FROM entry WHERE entry_type = 'article'"
-            params: list = []
-            if kb_name:
-                query += " AND kb_name = ?"
-                params.append(kb_name)
+            clause, scope_params = kb_scope_clause("kb_name", kb_name, readable_kbs)
+            query += clause
+            params = list(scope_params)
             query += " ORDER BY updated_at DESC"
 
             rows = db._raw_conn.execute(query, params).fetchall()
@@ -262,8 +276,14 @@ class EncyclopediaPlugin:
             if should_close:
                 db.close()
 
-    def _mcp_stubs(self, args: dict[str, Any]) -> dict[str, Any]:
-        """List stub articles."""
+    def _mcp_stubs(
+        self, args: dict[str, Any], *, readable_kbs: set[str] | None = None
+    ) -> dict[str, Any]:
+        """List stub articles.
+
+        With no `kb_name` this spans every KB, so the caller's readable set
+        narrows the query (#223), not the page: the handler stops at `limit`.
+        """
         import json
 
         db, should_close = self._get_db()
@@ -272,10 +292,9 @@ class EncyclopediaPlugin:
 
         try:
             query = "SELECT * FROM entry WHERE entry_type = 'article'"
-            params: list = []
-            if kb_name:
-                query += " AND kb_name = ?"
-                params.append(kb_name)
+            clause, scope_params = kb_scope_clause("kb_name", kb_name, readable_kbs)
+            query += clause
+            params = list(scope_params)
             query += " ORDER BY created_at ASC"
 
             rows = db._raw_conn.execute(query, params).fetchall()

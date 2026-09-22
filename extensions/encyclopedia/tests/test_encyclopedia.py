@@ -1,8 +1,11 @@
 """Tests for the Encyclopedia extension."""
 
+import sqlite3
 import tempfile
 from pathlib import Path
+from types import SimpleNamespace
 
+import pytest
 from pyrite_encyclopedia.entry_types import (
     QUALITY_LEVELS,
     ArticleEntry,
@@ -607,3 +610,74 @@ class TestCoreIntegration:
         hooks = registry.get_all_hooks()
         assert "before_save" in hooks
         assert "after_save" in hooks
+
+
+class TestWikiListsNarrowToTheReadableSet:
+    """`wiki_stubs`, `wiki_review_queue` and `wiki_quality_stats` (#223).
+
+    All three declare `kb_name` optionally, so a call that omits it spans every
+    KB -- which the MCP chokepoint refuses for a scoped caller rather than
+    serving the index, leaving the tools unusable for exactly those callers.
+    Each passes the readable set into the query through `kb_scope_clause`, the
+    same rule the social tools use.
+    """
+
+    @pytest.fixture
+    def plugin(self, tmp_path):
+        conn = sqlite3.connect(tmp_path / "index.db")
+        conn.row_factory = sqlite3.Row
+        conn.execute(
+            "CREATE TABLE entry (id TEXT, kb_name TEXT, title TEXT, entry_type TEXT,"
+            " metadata TEXT, created_at TEXT, updated_at TEXT)"
+        )
+        conn.executemany(
+            "INSERT INTO entry (id, kb_name, title, entry_type, metadata, created_at,"
+            " updated_at) VALUES (?, ?, ?, 'article', ?, '2026-01-01', '2026-01-02')",
+            [
+                ("pub-stub", "public-kb", "Public stub", '{"quality": "stub"}'),
+                (
+                    "pub-review",
+                    "public-kb",
+                    "Public review",
+                    '{"quality": "good", "review_status": "under_review"}',
+                ),
+                ("priv-stub", "private-kb", "Private stub", '{"quality": "stub"}'),
+                (
+                    "priv-review",
+                    "private-kb",
+                    "Private review",
+                    '{"quality": "good", "review_status": "under_review"}',
+                ),
+            ],
+        )
+        conn.commit()
+        plugin = EncyclopediaPlugin()
+        plugin._get_db = lambda: (SimpleNamespace(_raw_conn=conn), False)
+        return plugin
+
+    def test_stubs_are_narrowed_to_the_readable_set(self, plugin):
+        out = plugin._mcp_stubs({}, readable_kbs={"public-kb"})
+        assert [s["id"] for s in out["stubs"]] == ["pub-stub"]
+
+    def test_review_queue_is_narrowed_to_the_readable_set(self, plugin):
+        out = plugin._mcp_review_queue({}, readable_kbs={"public-kb"})
+        assert [a["id"] for a in out["queue"]] == ["pub-review"]
+
+    def test_quality_stats_count_only_readable_articles(self, plugin):
+        out = plugin._mcp_quality_stats({}, readable_kbs={"public-kb"})
+        assert out["total_articles"] == 2
+        assert out["quality_distribution"] == {"stub": 1, "good": 1}
+        assert out["review_queue_size"] == 1
+
+    def test_an_unscoped_caller_still_spans_every_kb(self, plugin):
+        out = plugin._mcp_stubs({})
+        assert {s["id"] for s in out["stubs"]} == {"pub-stub", "priv-stub"}
+
+    def test_an_empty_readable_set_returns_nothing(self, plugin):
+        assert plugin._mcp_stubs({}, readable_kbs=set())["stubs"] == []
+        assert plugin._mcp_review_queue({}, readable_kbs=set())["queue"] == []
+        assert plugin._mcp_quality_stats({}, readable_kbs=set())["total_articles"] == 0
+
+    def test_a_named_kb_binds_to_that_kb(self, plugin):
+        out = plugin._mcp_stubs({"kb_name": "private-kb"}, readable_kbs={"public-kb", "private-kb"})
+        assert [s["id"] for s in out["stubs"]] == ["priv-stub"]
