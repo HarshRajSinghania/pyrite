@@ -524,27 +524,28 @@ class TestOmittingTheKBNameIsNotAWayIn:
     def test_a_tool_that_cannot_filter_is_refused_not_served(self, env):
         """Fail closed, against a set of tools that is deliberately shrinking.
 
-        The six extensions are being taught to filter by the readable set one
-        at a time (#223): social, zettelkasten, encyclopedia, cascade and
-        software-kb have landed, so the example here now comes from
-        `journalism-investigation`, the one extension left. A tool that takes
-        no readable set and spans every KB when `kb_name` is omitted is
-        refused, not served; once a tool filters, its own tests cover it and
-        this one moves on to the next extension still in the list.
+        The six extensions have all landed (#223): social, zettelkasten,
+        encyclopedia, cascade, software-kb and journalism-investigation read
+        through the readable set now. The example here comes from the tools
+        that keep the fail-closed listing -- journalism-investigation's
+        write-path tools, which take no readable set (a caller who may write
+        a KB can read it, so the tier guard covers the read). A tool that
+        takes no readable set is refused for a scoped caller, not served;
+        when one of these learns to filter, this test moves on again.
         """
-        server = env["server_for_tier"]("read")
-        if "investigation_entities" not in server.tools:
+        server = env["server_for_tier"]("write")
+        if "investigation_bulk_edges" not in server.tools:
             pytest.skip("journalism-investigation extension not installed")
         out = server._dispatch_tool(
-            "investigation_entities", {}, client_id="peer", readable_kbs={PUBLIC}
+            "investigation_bulk_edges", {}, client_id="peer", readable_kbs={PUBLIC}
         )
         assert out["error_code"] == "NOT_FOUND"
 
     def test_the_same_tool_still_works_for_an_unscoped_caller(self, env):
-        server = env["server_for_tier"]("read")
-        if "investigation_entities" not in server.tools:
+        server = env["server_for_tier"]("write")
+        if "investigation_bulk_edges" not in server.tools:
             pytest.skip("journalism-investigation extension not installed")
-        out = server._dispatch_tool("investigation_entities", {}, client_id="operator")
+        out = server._dispatch_tool("investigation_bulk_edges", {}, client_id="operator")
         assert out.get("error_code") != "NOT_FOUND"
 
 

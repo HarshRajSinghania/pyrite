@@ -1,5 +1,6 @@
 """Journalism Investigation plugin for pyrite."""
 
+import secrets
 from typing import Any, ClassVar
 
 from pyrite.plugins.capabilities import Capability
@@ -29,6 +30,14 @@ from .queries import (
 )
 from .utils import parse_meta
 from .validators import validate_investigation_entry
+
+# Prefix for the fresh guard name used when a scoped caller may not read the KB
+# a tool resolves to (#223). KB names are unrestricted, so a fixed public name
+# could itself be a real KB and serve its entries. A fresh unguessable name on
+# every denied call cannot be registered ahead of use. It remains a *name*
+# rather than None on purpose: None is how the query functions spell "every
+# KB", so passing it would serve the index.
+_UNREADABLE_KB_PREFIX = "(unreadable-"
 
 
 class JournalismInvestigationPlugin:
@@ -67,6 +76,25 @@ class JournalismInvestigationPlugin:
     def _resolve_kb(self, args: dict[str, Any]) -> str:
         """Resolve kb_name from args, default investigation KB, or 'investigation'."""
         return args.get("kb_name") or self._default_investigation_kb() or "investigation"
+
+    def _readable_kb(self, args: dict[str, Any], readable_kbs: set[str] | None) -> str:
+        """The KB this call reads, or a name that matches nothing (#223).
+
+        `_resolve_kb` settles on one KB -- the caller's, or this plugin's
+        default -- and a scoped caller may not be able to read that default.
+        The chokepoint already refuses a call that *names* an unreadable KB, so
+        the default is the case left, and it is answered with whatever the
+        query returns for a KB that has no entries: the tool's own shape, with
+        nothing in it.
+
+        A guard *name* rather than `None`, on purpose. `None` is how the query
+        functions spell "every KB", so passing it for an unreadable default
+        would serve the index instead of nothing.
+        """
+        kb = self._resolve_kb(args)
+        if readable_kbs is None or kb in readable_kbs:
+            return kb
+        return f"{_UNREADABLE_KB_PREFIX}{secrets.token_hex(32)})"
 
     def _scoped_kb_names(
         self, requested: list[str] | None, readable_kbs: set[str] | None
@@ -818,12 +846,14 @@ class JournalismInvestigationPlugin:
     # Read-tier MCP tool handlers — delegate to pure query functions
     # =========================================================================
 
-    def _mcp_timeline(self, args: dict[str, Any]) -> dict[str, Any]:
+    def _mcp_timeline(
+        self, args: dict[str, Any], *, readable_kbs: set[str] | None = None
+    ) -> dict[str, Any]:
         db, should_close = self._get_db()
         try:
             return query_timeline(
                 db,
-                self._resolve_kb(args),
+                self._readable_kb(args, readable_kbs),
                 from_date=args.get("from_date", ""),
                 to_date=args.get("to_date", ""),
                 actor=args.get("actor", ""),
@@ -835,12 +865,14 @@ class JournalismInvestigationPlugin:
             if should_close:
                 db.close()
 
-    def _mcp_entities(self, args: dict[str, Any]) -> dict[str, Any]:
+    def _mcp_entities(
+        self, args: dict[str, Any], *, readable_kbs: set[str] | None = None
+    ) -> dict[str, Any]:
         db, should_close = self._get_db()
         try:
             return query_entities(
                 db,
-                self._resolve_kb(args),
+                self._readable_kb(args, readable_kbs),
                 entity_type=args.get("entity_type", ""),
                 min_importance=args.get("min_importance", 0),
                 jurisdiction=args.get("jurisdiction", ""),
@@ -850,12 +882,14 @@ class JournalismInvestigationPlugin:
             if should_close:
                 db.close()
 
-    def _mcp_network(self, args: dict[str, Any]) -> dict[str, Any]:
+    def _mcp_network(
+        self, args: dict[str, Any], *, readable_kbs: set[str] | None = None
+    ) -> dict[str, Any]:
         db, should_close = self._get_db()
         try:
             return query_network(
                 db,
-                self._resolve_kb(args),
+                self._readable_kb(args, readable_kbs),
                 args["entry_id"],
                 limit=args.get("limit", 50),
                 offset=args.get("offset", 0),
@@ -864,12 +898,14 @@ class JournalismInvestigationPlugin:
             if should_close:
                 db.close()
 
-    def _mcp_sources(self, args: dict[str, Any]) -> dict[str, Any]:
+    def _mcp_sources(
+        self, args: dict[str, Any], *, readable_kbs: set[str] | None = None
+    ) -> dict[str, Any]:
         db, should_close = self._get_db()
         try:
             return query_sources(
                 db,
-                self._resolve_kb(args),
+                self._readable_kb(args, readable_kbs),
                 reliability=args.get("reliability", ""),
                 classification=args.get("classification", ""),
                 from_date=args.get("from_date", ""),
@@ -880,12 +916,14 @@ class JournalismInvestigationPlugin:
             if should_close:
                 db.close()
 
-    def _mcp_claims(self, args: dict[str, Any]) -> dict[str, Any]:
+    def _mcp_claims(
+        self, args: dict[str, Any], *, readable_kbs: set[str] | None = None
+    ) -> dict[str, Any]:
         db, should_close = self._get_db()
         try:
             return query_claims(
                 db,
-                self._resolve_kb(args),
+                self._readable_kb(args, readable_kbs),
                 claim_status=args.get("claim_status", ""),
                 confidence=args.get("confidence", ""),
                 min_importance=args.get("min_importance", 0),
@@ -895,22 +933,26 @@ class JournalismInvestigationPlugin:
             if should_close:
                 db.close()
 
-    def _mcp_evidence_chain(self, args: dict[str, Any]) -> dict[str, Any]:
+    def _mcp_evidence_chain(
+        self, args: dict[str, Any], *, readable_kbs: set[str] | None = None
+    ) -> dict[str, Any]:
         db, should_close = self._get_db()
         try:
-            return query_evidence_chain(db, self._resolve_kb(args), args["claim_id"])
+            return query_evidence_chain(db, self._readable_kb(args, readable_kbs), args["claim_id"])
         finally:
             if should_close:
                 db.close()
 
-    def _mcp_export_pack(self, args: dict[str, Any]) -> dict[str, Any]:
+    def _mcp_export_pack(
+        self, args: dict[str, Any], *, readable_kbs: set[str] | None = None
+    ) -> dict[str, Any]:
         from .export import build_investigation_pack, export_as_json, export_as_markdown
 
         db, should_close = self._get_db()
         try:
             pack = build_investigation_pack(
                 db,
-                self._resolve_kb(args),
+                self._readable_kb(args, readable_kbs),
                 redact_sources=args.get("redact_sources", False),
                 min_importance=args.get("min_importance", 0),
             )
@@ -922,14 +964,16 @@ class JournalismInvestigationPlugin:
             if should_close:
                 db.close()
 
-    def _mcp_money_flow(self, args: dict[str, Any]) -> dict[str, Any]:
+    def _mcp_money_flow(
+        self, args: dict[str, Any], *, readable_kbs: set[str] | None = None
+    ) -> dict[str, Any]:
         from .money_flow import trace_money_flow
 
         db, should_close = self._get_db()
         try:
             return trace_money_flow(
                 db,
-                self._resolve_kb(args),
+                self._readable_kb(args, readable_kbs),
                 args["entry_id"],
                 direction=args.get("direction", "both"),
                 max_hops=args.get("max_hops", 3),
@@ -940,28 +984,32 @@ class JournalismInvestigationPlugin:
             if should_close:
                 db.close()
 
-    def _mcp_qa_report(self, args: dict[str, Any]) -> dict[str, Any]:
+    def _mcp_qa_report(
+        self, args: dict[str, Any], *, readable_kbs: set[str] | None = None
+    ) -> dict[str, Any]:
         from .qa import compute_qa_metrics
 
         db, should_close = self._get_db()
         try:
             return compute_qa_metrics(
                 db,
-                self._resolve_kb(args),
+                self._readable_kb(args, readable_kbs),
                 stale_days=args.get("stale_days", 30),
             )
         finally:
             if should_close:
                 db.close()
 
-    def _mcp_ownership_chain(self, args: dict[str, Any]) -> dict[str, Any]:
+    def _mcp_ownership_chain(
+        self, args: dict[str, Any], *, readable_kbs: set[str] | None = None
+    ) -> dict[str, Any]:
         from .ownership import trace_ownership_chain
 
         db, should_close = self._get_db()
         try:
             return trace_ownership_chain(
                 db,
-                self._resolve_kb(args),
+                self._readable_kb(args, readable_kbs),
                 entity_id=args["entry_id"],
                 max_depth=args.get("max_depth", 5),
             )
@@ -1211,13 +1259,15 @@ class JournalismInvestigationPlugin:
             if should_close:
                 db.close()
 
-    def _mcp_investigation_status(self, args: dict[str, Any]) -> dict[str, Any]:
+    def _mcp_investigation_status(
+        self, args: dict[str, Any], *, readable_kbs: set[str] | None = None
+    ) -> dict[str, Any]:
         """Get investigation status report."""
         from .investigation_setup import build_investigation_status
 
         db, should_close = self._get_db()
         try:
-            return build_investigation_status(db, self._resolve_kb(args))
+            return build_investigation_status(db, self._readable_kb(args, readable_kbs))
         finally:
             if should_close:
                 db.close()
@@ -1266,7 +1316,9 @@ class JournalismInvestigationPlugin:
             if should_close:
                 db.close()
 
-    def _mcp_ftm_export(self, args: dict[str, Any]) -> dict[str, Any]:
+    def _mcp_ftm_export(
+        self, args: dict[str, Any], *, readable_kbs: set[str] | None = None
+    ) -> dict[str, Any]:
         """Export KB entries as FtM JSON."""
         from .ftm import export_ftm
 
@@ -1275,7 +1327,7 @@ class JournalismInvestigationPlugin:
             return {
                 "entities": export_ftm(
                     db,
-                    self._resolve_kb(args),
+                    self._readable_kb(args, readable_kbs),
                     entry_types=args.get("entry_types"),
                 ),
             }
