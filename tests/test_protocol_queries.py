@@ -187,6 +187,43 @@ class TestFindByLocation:
         assert rows == []
 
 
+class TestFindersNarrowToKbNames:
+    """#223: the four protocol finders narrow in SQL, not after ``LIMIT``.
+
+    Post-filtering a page SQL has already cut can hand a scoped caller a
+    short one: unreadable rows fill the limit and are dropped, so readable
+    rows below them never arrive. The clause is the shared one -- a readable
+    set narrows, an empty set matches nothing, and ``None`` is unchanged
+    (the tests above cover that case).
+    """
+
+    @pytest.mark.parametrize(
+        ("finder", "args"),
+        [
+            ("find_by_assignee", {"assignee": "agent:alpha"}),
+            ("find_overdue", {}),
+            ("find_by_status", {"status": "in_progress"}),
+            ("find_by_location", {"location": "New York"}),
+        ],
+    )
+    def test_a_readable_set_narrows(self, db, finder, args):
+        rows = getattr(db, finder)(**args, kb_names={"kb-a"})
+        assert rows, f"{finder} returned nothing; the assertion below would be vacuous"
+        assert {r["kb_name"] for r in rows} == {"kb-a"}
+
+    @pytest.mark.parametrize(
+        ("finder", "args"),
+        [
+            ("find_by_assignee", {"assignee": "agent:alpha"}),
+            ("find_overdue", {}),
+            ("find_by_status", {"status": "in_progress"}),
+            ("find_by_location", {"location": "New York"}),
+        ],
+    )
+    def test_an_empty_set_matches_nothing(self, db, finder, args):
+        assert getattr(db, finder)(**args, kb_names=set()) == []
+
+
 class TestProtocolFieldsInGetEntry:
     """Protocol fields must appear as top-level keys in get_entry() results."""
 

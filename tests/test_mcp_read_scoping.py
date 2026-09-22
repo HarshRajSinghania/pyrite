@@ -616,3 +616,74 @@ class TestTheResolverIsSharedWithREST:
             "api.readable_kbs no longer delegates to the shared helper -- MCP "
             "and REST now have two implementations of one rule"
         )
+
+
+class TestTheFindersReturnAFullPage:
+    """#223: the four core finders narrow in SQL, so a scoped page is full.
+
+    The handlers used to cut the page with `LIMIT` and drop unreadable rows
+    afterwards, so a scoped caller asking for two could receive none while
+    two readable rows existed below the cut. This fixture gives the private
+    rows the later `updated_at`, which puts them first in the sort order --
+    exactly the page that used to be cut before the readable rows arrived.
+    """
+
+    @pytest.fixture
+    def finders_env(self):
+        with tempfile.TemporaryDirectory() as d:
+            tmp = Path(d)
+            (tmp / PUBLIC).mkdir()
+            (tmp / PRIVATE).mkdir()
+            config = PyriteConfig(
+                knowledge_bases=[
+                    KBConfig(
+                        name=PUBLIC, path=tmp / PUBLIC, kb_type="generic", default_role="read"
+                    ),
+                    KBConfig(
+                        name=PRIVATE, path=tmp / PRIVATE, kb_type="generic", default_role="none"
+                    ),
+                ],
+                settings=Settings(index_path=tmp / "index.db"),
+            )
+            db = PyriteDB(config.settings.index_path)
+            for kb in (PUBLIC, PRIVATE):
+                db.register_kb(kb, "generic", str(tmp / kb))
+            # Raw inserts so `updated_at` is under the test's control: the
+            # private rows sort first under `ORDER BY updated_at DESC`.
+            for kb, updated in (
+                (PRIVATE, "2026-06-01T00:00:00"),
+                (PUBLIC, "2026-01-01T00:00:00"),
+            ):
+                for i in range(2):
+                    db._raw_conn.execute(
+                        "INSERT INTO entry (id, kb_name, entry_type, title, body, metadata,"
+                        " importance, status, assignee, due_date, location,"
+                        " created_at, updated_at)"
+                        " VALUES (?, ?, 'note', ?, '', '{}', 5, 'open', 'agent:x',"
+                        " '2026-01-01', 'Springfield', '2026-01-01T00:00:00', ?)",
+                        (f"{kb}-{i}", kb, f"{kb} note {i}", updated),
+                    )
+            db._raw_conn.commit()
+            server = PyriteMCPServer(config=config, tier="read")
+            try:
+                yield {"server": server}
+            finally:
+                server.close()
+                db.close()
+
+    @pytest.mark.parametrize(
+        ("tool", "args"),
+        [
+            ("kb_find_by_status", {"status": "open"}),
+            ("kb_find_by_assignee", {"assignee": "agent:x"}),
+            ("kb_find_overdue", {}),
+            ("kb_find_by_location", {"location": "Springfield"}),
+        ],
+    )
+    def test_a_scoped_caller_gets_a_full_page(self, finders_env, tool, args):
+        out = finders_env["server"]._dispatch_tool(
+            tool, {**args, "limit": 2}, client_id="peer", readable_kbs={PUBLIC}
+        )
+        assert {e["id"] for e in out["entries"]} == {f"{PUBLIC}-0", f"{PUBLIC}-1"}, out
+        assert out["count"] == 2
+        assert PRIVATE not in json.dumps(out)

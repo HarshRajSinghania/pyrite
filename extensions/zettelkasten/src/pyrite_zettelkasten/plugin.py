@@ -148,7 +148,7 @@ class ZettelkastenPlugin:
         set goes down to the storage query instead (#223): `list_entries`
         bounds with `limit`, so narrowing the page afterwards would hand a
         scoped caller a short one. `kb_names` already means "nothing" for an
-        empty set (`_kb_names_clause` emits `1 = 0`), so a caller who may read
+        empty set (`kb_names_clause` emits `1 = 0`), so a caller who may read
         nothing gets nothing rather than everything.
         """
         import json

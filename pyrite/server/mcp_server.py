@@ -950,6 +950,7 @@ class PyriteMCPServer:
             status=args.get("status"),
             limit=min(args.get("limit", 50), 200),
             offset=args.get("offset", 0),
+            kb_names=None if args.get("kb_name") else readable_kbs,
         )
         rows = _only_readable(rows, readable_kbs)
         return {"entries": rows, "count": len(rows), "assignee": assignee}
@@ -963,6 +964,7 @@ class PyriteMCPServer:
             kb_name=args.get("kb_name"),
             limit=min(args.get("limit", 50), 200),
             offset=args.get("offset", 0),
+            kb_names=None if args.get("kb_name") else readable_kbs,
         )
         rows = _only_readable(rows, readable_kbs)
         return {"entries": rows, "count": len(rows)}
@@ -980,6 +982,7 @@ class PyriteMCPServer:
             entry_type=args.get("entry_type"),
             limit=min(args.get("limit", 50), 200),
             offset=args.get("offset", 0),
+            kb_names=None if args.get("kb_name") else readable_kbs,
         )
         rows = _only_readable(rows, readable_kbs)
         return {"entries": rows, "count": len(rows), "status": status}
@@ -996,6 +999,7 @@ class PyriteMCPServer:
             kb_name=args.get("kb_name"),
             limit=min(args.get("limit", 50), 200),
             offset=args.get("offset", 0),
+            kb_names=None if args.get("kb_name") else readable_kbs,
         )
         rows = _only_readable(rows, readable_kbs)
         return {"entries": rows, "count": len(rows), "location": location}

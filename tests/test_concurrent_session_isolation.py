@@ -41,6 +41,7 @@ survives `pytest -n 4`.
 from __future__ import annotations
 
 import inspect
+import itertools
 import threading
 import time
 from pathlib import Path
@@ -156,9 +157,14 @@ def test_concurrent_reads_and_writes_are_isolated(seeded_db: PyriteDB) -> None:
     the same bug."""
     errors: list[str] = []
     lock = threading.Lock()
+    next_worker = itertools.count()
 
     def worker(barrier: threading.Barrier) -> None:
-        idx = threading.get_ident() % 1000
+        # Distinct per worker, and deliberately not derived from the thread
+        # id: those are pointers, two of them can be congruent modulo 1000,
+        # and that collision wrote the same entry id from two workers -- a
+        # UNIQUE-constraint failure that has nothing to do with this test.
+        idx = next(next_worker)
         try:
             barrier.wait()
         except threading.BrokenBarrierError:  # pragma: no cover

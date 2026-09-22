@@ -9,6 +9,7 @@ Settings methods use ORM directly (app-state, not in SearchBackend).
 from datetime import UTC, datetime
 from typing import Any
 
+from .backends.base_backend import kb_names_clause
 from .models import Setting
 
 
@@ -338,8 +339,13 @@ class QueryMixin:
         status: str | None = None,
         limit: int = 50,
         offset: int = 0,
+        kb_names: set[str] | list[str] | None = None,
     ) -> list[dict[str, Any]]:
-        """Find entries assigned to a specific agent/user, across all entry types."""
+        """Find entries assigned to a specific agent/user, across all entry types.
+
+        `kb_names` narrows in SQL (#223): filtering after ``LIMIT`` would
+        drop unreadable rows and hand a scoped caller a short page.
+        """
         from sqlalchemy import text
 
         sql = "SELECT * FROM entry WHERE assignee = :assignee"
@@ -347,6 +353,9 @@ class QueryMixin:
         if kb_name:
             sql += " AND kb_name = :kb_name"
             params["kb_name"] = kb_name
+        scope = kb_names_clause("kb_name", kb_names, params)
+        if scope:
+            sql += f" AND {scope}"
         if status:
             sql += " AND status = :status"
             params["status"] = status
@@ -364,10 +373,14 @@ class QueryMixin:
         kb_name: str | None = None,
         limit: int = 50,
         offset: int = 0,
+        kb_names: set[str] | list[str] | None = None,
     ) -> list[dict[str, Any]]:
         """Find entries with due_date before a given date (default: now).
 
         Only returns entries that are not yet done or failed.
+
+        `kb_names` narrows in SQL (#223): filtering after ``LIMIT`` would
+        drop unreadable rows and hand a scoped caller a short page.
         """
         from sqlalchemy import text
 
@@ -383,6 +396,9 @@ class QueryMixin:
         if kb_name:
             sql += " AND kb_name = :kb_name"
             params["kb_name"] = kb_name
+        scope = kb_names_clause("kb_name", kb_names, params)
+        if scope:
+            sql += f" AND {scope}"
         sql += " ORDER BY due_date ASC LIMIT :limit OFFSET :offset"
         params["limit"] = limit
         params["offset"] = offset
@@ -398,8 +414,13 @@ class QueryMixin:
         entry_type: str | None = None,
         limit: int = 50,
         offset: int = 0,
+        kb_names: set[str] | list[str] | None = None,
     ) -> list[dict[str, Any]]:
-        """Find entries by status, across all entry types."""
+        """Find entries by status, across all entry types.
+
+        `kb_names` narrows in SQL (#223): filtering after ``LIMIT`` would
+        drop unreadable rows and hand a scoped caller a short page.
+        """
         from sqlalchemy import text
 
         sql = "SELECT * FROM entry WHERE status = :status"
@@ -407,6 +428,9 @@ class QueryMixin:
         if kb_name:
             sql += " AND kb_name = :kb_name"
             params["kb_name"] = kb_name
+        scope = kb_names_clause("kb_name", kb_names, params)
+        if scope:
+            sql += f" AND {scope}"
         if entry_type:
             sql += " AND entry_type = :entry_type"
             params["entry_type"] = entry_type
@@ -424,8 +448,13 @@ class QueryMixin:
         kb_name: str | None = None,
         limit: int = 50,
         offset: int = 0,
+        kb_names: set[str] | list[str] | None = None,
     ) -> list[dict[str, Any]]:
-        """Find entries by location (substring match), across all entry types."""
+        """Find entries by location (substring match), across all entry types.
+
+        `kb_names` narrows in SQL (#223): filtering after ``LIMIT`` would
+        drop unreadable rows and hand a scoped caller a short page.
+        """
         from sqlalchemy import text
 
         sql = "SELECT * FROM entry WHERE location LIKE :location"
@@ -433,6 +462,9 @@ class QueryMixin:
         if kb_name:
             sql += " AND kb_name = :kb_name"
             params["kb_name"] = kb_name
+        scope = kb_names_clause("kb_name", kb_names, params)
+        if scope:
+            sql += f" AND {scope}"
         sql += " ORDER BY updated_at DESC LIMIT :limit OFFSET :offset"
         params["limit"] = limit
         params["offset"] = offset

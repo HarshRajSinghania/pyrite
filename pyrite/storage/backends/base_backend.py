@@ -24,6 +24,32 @@ from ...utils.json_utils import SafeEncoder as _SafeEncoder
 from ..models import Block, EdgeEndpoint, Entry, EntryRef, EntryTag, Link, Source, Tag
 
 
+def kb_names_clause(
+    column: str, kb_names: set[str] | list[str] | None, params: dict[str, Any]
+) -> str | None:
+    """SQL predicate restricting ``column`` to ``kb_names``, binding params.
+
+    ``None`` means "not scoped" -- no predicate. An *empty* set means
+    "this caller may read nothing", which must match no rows, not every
+    row: ``IN ()`` is not valid SQLite, so it becomes ``1 = 0``.
+
+    Module-level so the facade's four protocol finders
+    (``pyrite/storage/queries.py``) apply the same rule as the backend's own
+    SQL -- one copy of it, not two (#223).
+    """
+    if kb_names is None:
+        return None
+    names = list(kb_names)
+    if not names:
+        return "1 = 0"
+    keys = []
+    for i, name in enumerate(names):
+        key = f"kbn_{i}"
+        params[key] = name
+        keys.append(f":{key}")
+    return f"{column} IN ({', '.join(keys)})"
+
+
 class BaseBackend(ABC):
     """Shared ORM and raw-SQL logic for search backends."""
 
@@ -870,28 +896,6 @@ class BaseBackend(ABC):
     # Tags (raw SQL — shared via _exec)
     # =====================================================================
 
-    @staticmethod
-    def _kb_names_clause(
-        column: str, kb_names: set[str] | list[str] | None, params: dict[str, Any]
-    ) -> str | None:
-        """SQL predicate restricting ``column`` to ``kb_names``, binding params.
-
-        ``None`` means "not scoped" -- no predicate. An *empty* set means
-        "this caller may read nothing", which must match no rows, not every
-        row: ``IN ()`` is not valid SQLite, so it becomes ``1 = 0``.
-        """
-        if kb_names is None:
-            return None
-        names = list(kb_names)
-        if not names:
-            return "1 = 0"
-        keys = []
-        for i, name in enumerate(names):
-            key = f"kbn_{i}"
-            params[key] = name
-            keys.append(f":{key}")
-        return f"{column} IN ({', '.join(keys)})"
-
     def get_all_tags(
         self,
         kb_name: str | None = None,
@@ -902,7 +906,7 @@ class BaseBackend(ABC):
         if kb_name:
             conditions.append("et.kb_name = :kb_name")
             params["kb_name"] = kb_name
-        scope = self._kb_names_clause("et.kb_name", kb_names, params)
+        scope = kb_names_clause("et.kb_name", kb_names, params)
         if scope:
             conditions.append(scope)
         where = (" WHERE " + " AND ".join(conditions)) if conditions else ""
@@ -928,7 +932,7 @@ class BaseBackend(ABC):
         if kb_name:
             conditions.append("et.kb_name = :kb_name")
             params["kb_name"] = kb_name
-        scope = self._kb_names_clause("et.kb_name", kb_names, params)
+        scope = kb_names_clause("et.kb_name", kb_names, params)
         if scope:
             conditions.append(scope)
         if prefix:
@@ -969,7 +973,7 @@ class BaseBackend(ABC):
         if kb_name:
             sql += " AND kb_name = :kb_name"
             params["kb_name"] = kb_name
-        scope = self._kb_names_clause("kb_name", kb_names, params)
+        scope = kb_names_clause("kb_name", kb_names, params)
         if scope:
             sql += f" AND {scope}"
         if date_from:
