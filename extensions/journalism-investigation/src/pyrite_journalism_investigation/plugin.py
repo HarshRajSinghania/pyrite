@@ -68,6 +68,24 @@ class JournalismInvestigationPlugin:
         """Resolve kb_name from args, default investigation KB, or 'investigation'."""
         return args.get("kb_name") or self._default_investigation_kb() or "investigation"
 
+    def _scoped_kb_names(
+        self, requested: list[str] | None, readable_kbs: set[str] | None
+    ) -> list[str] | None:
+        """The KBs a cross-KB tool may actually search (#223).
+
+        `None` is how `cross_kb_search` and `find_duplicates` spell "every KB",
+        so an unscoped caller keeps it unchanged. A scoped caller gets the
+        intersection of the KBs they asked for and the ones they may read, or
+        simply the readable set when they asked for nothing -- and an empty
+        result stays an *empty list*, never `None`, because `None` would search
+        the whole index. Callers short-circuit on the empty list.
+        """
+        if readable_kbs is None:
+            return requested
+        if not requested:
+            return sorted(readable_kbs)
+        return [name for name in requested if name in readable_kbs]
+
     def get_entry_types(self) -> dict[str, type]:
         return {
             "asset": AssetEntry,
@@ -951,15 +969,22 @@ class JournalismInvestigationPlugin:
             if should_close:
                 db.close()
 
-    def _mcp_find_duplicates(self, args: dict[str, Any]) -> dict[str, Any]:
+    def _mcp_find_duplicates(
+        self, args: dict[str, Any], *, readable_kbs: set[str] | None = None
+    ) -> dict[str, Any]:
+        """Find near-duplicates, narrowed to the KBs the caller may read (#223)."""
         from .dedup import find_duplicates
+
+        kb_names = self._scoped_kb_names(args.get("kb_names"), readable_kbs)
+        if kb_names is not None and not kb_names:
+            return {"duplicates": []}
 
         db, should_close = self._get_db()
         try:
             return {
                 "duplicates": find_duplicates(
                     db,
-                    kb_names=args.get("kb_names"),
+                    kb_names=kb_names,
                     entry_types=args.get("entry_types"),
                     threshold=args.get("threshold", 0.85),
                 ),
@@ -1127,16 +1152,28 @@ class JournalismInvestigationPlugin:
         except Exception as e:
             return {"error": str(e)}
 
-    def _mcp_search_all(self, args: dict[str, Any]) -> dict[str, Any]:
-        """Search across all KBs with optional correlation."""
+    def _mcp_search_all(
+        self, args: dict[str, Any], *, readable_kbs: set[str] | None = None
+    ) -> dict[str, Any]:
+        """Search across KBs, narrowed to the ones the caller may read (#223).
+
+        Omitting `kb_names` used to mean "every KB"; for a scoped caller it now
+        means "every KB you may read", and a request that names KBs keeps the
+        ones among them that are readable. `None` still means every KB for an
+        unscoped caller (global admin, operator API key, local stdio).
+        """
         from .cross_kb_search import correlate_results, cross_kb_search
+
+        kb_names = self._scoped_kb_names(args.get("kb_names"), readable_kbs)
+        if kb_names is not None and not kb_names:
+            return {"query": args["query"], "total_count": 0, "groups": []}
 
         db, should_close = self._get_db()
         try:
             result = cross_kb_search(
                 db,
                 args["query"],
-                kb_names=args.get("kb_names"),
+                kb_names=kb_names,
                 entry_type=args.get("entry_type"),
                 limit=args.get("limit", 50),
             )
