@@ -17,6 +17,312 @@ asserts that `[Unreleased]` stays empty.
 
 The community's first release — see the announcement and `kb/roadmap.md`.
 
+### Changed
+
+- **Unreleased changes are now recorded as one file per change under
+  `changelog.d/`, not as a bullet in `CHANGELOG.md` (#243).** Every
+  `[Unreleased]` bullet was appended at the same spot, so any two pull requests
+  in flight conflicted there by construction — five times in one session, three
+  of them on first-time contributors' branches, every one resolved by "keep
+  both, either order". A fragment is named `<slug>.<section>.md`, so no two
+  branches write the same path and neither a rebase nor a merge has anything to
+  resolve; `scripts/release.py` assembles the fragments under the version
+  heading at release time and deletes them, and refuses an unknown section
+  rather than dropping the entry. See `changelog.d/README.md`.
+
+### Fixed
+
+- **The cascade list tools return only rows from KBs the caller may read
+  (#223).** `cascade_actors`, `cascade_timeline`, `cascade_capture_lanes`,
+  `solidarity_timeline` and `solidarity_infrastructure_types` take `kb_name`
+  optionally, and four of them default it to their own KB -- so a scoped caller
+  who omitted the name was refused rather than served a KB they may not read.
+  Each handler passes the caller's readable set to the storage query alongside
+  the name, which means the default KB is served only when it is readable, and
+  `cascade_capture_lanes` (which has no default) spans exactly what the caller
+  may read rather than the whole index. Unscoped callers are unchanged.
+
+- **A containerised Pyrite now binds `0.0.0.0` and honours the platform's
+  `$PORT`, so a Docker or Railway deploy passes its healthcheck (#20).** The
+  server defaulted to `127.0.0.1:8088` and ignored `PORT`, so it came up on an
+  interface nothing outside the container could reach and the platform killed
+  it as unhealthy. Port precedence is now `PYRITE_PORT` > `PORT` >
+  config/default, and a non-integer value raises an error naming the variable
+  it came from instead of a bare `int()` traceback. Only the image sets
+  `PYRITE_HOST=0.0.0.0` — a local `pyrite serve` still binds loopback, so
+  nothing on your machine starts listening on every interface because of this
+  change. Railway's one-click deploy still needs a volume mounted at `/data`.
+
+- **`pyrite create -t <type>` no longer silently files a different type when the
+  KB does not declare the one asked for (#197).** Core types were exempt from
+  the CLI's write-side refusal, so `-t note` against a KB whose schema declares
+  only `adr | backlog_item | component | standard` skipped the guard, and plugin
+  type resolution then promoted it to its most-derived `note` subtype — an ADR
+  with `adr_number: 0` under `kb/adrs/`, from a command that asked for a note.
+  The refusal now covers every type the KB does not declare; `--allow-undeclared`
+  still overrides it.
+
+- **The four protocol finders narrow to the caller's readable KBs in SQL
+  (#223).** `find_by_assignee`, `find_overdue`, `find_by_status` and
+  `find_by_location` took a single `kb_name`, so the four `kb_find_by_*` MCP
+  tools cut the page with `LIMIT` and dropped unreadable rows afterwards -- a
+  scoped caller could receive a short page while readable rows existed below
+  the cut. Each finder now takes `kb_names` and narrows through the shared
+  `kb_names_clause` (a named KB binds, a readable set narrows, an empty set
+  matches nothing, `None` is unchanged), and the four handlers pass the
+  readable set down. The handler's post-filter stays as the fail-closed
+  guard.
+
+- **A `GenericEntry` no longer duplicates its undeclared frontmatter keys into
+  a `metadata:` block on save.** `Entry._base_frontmatter` serialized the whole
+  `self.metadata` mapping as a nested block while `GenericEntry.to_frontmatter`
+  also promoted the same keys to top level, so a no-op load→save grew a
+  `metadata:` block the source file never had. Only keys that came from an
+  explicit `metadata:` block stay nested now; the rest are promoted once
+  (#149). A `metadata:` value that is not a mapping (null, a string, a list, a
+  number) is kept verbatim and written back on the next save, with a warning,
+  instead of failing the load and saving the file back as a different entry
+  type. Deliberate behaviour change: an entry *created* with `metadata={…}` now
+  writes those keys top-level only, where `dev` also wrote a nested block --
+  except a key the base frontmatter already emits (`title`, `id`, …), which
+  stays nested under `metadata:` rather than being dropped.
+
+- **`pyrite index health` no longer reports a `subdirectory_mismatches` false
+  positive for every entry of a type whose declared subdirectory ends in `/`.**
+  `people/` and `people` are the same directory, but the check compared the
+  declared string against a path component, so a KB created exactly as the
+  getting-started guide instructs came back `status: warning` with one row per
+  entry. Both sides are normalized now, and an entry genuinely in the wrong
+  directory is still flagged (#44).
+
+- **`investigation_search_all` and `investigation_find_duplicates` search only
+  the KBs the caller may read (#223).** Both take a *list* of KB names, and
+  omitting it means "every KB" to the code they delegate to -- so a scoped
+  caller who omitted it searched the whole index. Each handler now composes
+  what was asked for with what may be read: a list that names KBs keeps the
+  readable ones among them, no list means every readable KB, and an empty
+  result stays an empty list rather than collapsing back to "every KB".
+  Unscoped callers are unchanged. These were the two genuinely cross-KB tools
+  in the last extension; the rest resolve to a single KB and are handled
+  separately.
+
+- **The single-KB investigation tools serve nothing when the caller may not
+  read the KB they resolve to (#223).** Twelve read tools -- `investigation_timeline`,
+  `investigation_entities`, `investigation_network`, `investigation_sources`,
+  `investigation_claims`, `investigation_evidence_chain`,
+  `investigation_export_pack`, `investigation_money_flow`,
+  `investigation_qa_report`, `investigation_ownership_chain`,
+  `investigation_ftm_export`, `investigation_status` -- settle on one KB when
+  none is named: the caller's, or the plugin's own default. A scoped caller was
+  refused those calls rather than served a KB they may not read. Each resolves
+  through a guard now, which answers with a KB name that matches no entry when
+  the resolved KB is not readable, so the tool keeps its normal shape with
+  nothing in it. The write-path tools in the same extension keep the
+  fail-closed listing, because a caller who may write a KB can read it.
+
+- **Six backlog files no longer carry a folded copy of their own body, or
+  another machine's absolute path (#150).** They were committed with a `body:`
+  frontmatter key holding the whole entry text as a YAML scalar, and a stray
+  `file_path:` key pointing at a worktree on the machine that wrote them. The
+  write path already drops both keys on any save, so every load-and-save
+  rewrote those files; they have now been re-saved once, deliberately. The
+  text is unchanged -- the body section was already the whole entry, and for
+  two of them the folded copy was a truncated prefix of it -- and the
+  round-trip gate's residual count drops from 69 to 63.
+
+- **`cascade_network` and `investigation_network` page both directions instead of
+  returning every neighbour at once (#63).** On a hub node the old response was
+  roughly 18k tokens (35 outlinks plus about 130 backlinks for one cascade
+  node). Both tools now take `limit` (default 50, `0` means no cap) and `offset`
+  per direction, order each direction deterministically so a page never repeats
+  or skips a row, and return the true totals plus `truncated` so a caller can
+  tell what it did not see. The paging lives in `query_network`;
+  `get_outlinks` still has no pagination parameters of its own.
+
+- **The API returned 500s under ordinary concurrent read load: one SQLAlchemy
+  `Session` was shared by every request.** `PyriteDB` created a single
+  `Session` in its constructor and the server cached one `PyriteDB` on app
+  state, so the ~117 plain `def` handlers — which FastAPI runs on anyio's
+  40-thread worker pool — all drove one session at once, with
+  `check_same_thread=False` silencing SQLite's own guard. The result was
+  corrupted result state rather than a clean error, surfacing as
+  `IndexError: tuple index out of range`, `InvalidRequestError: This session is
+  provisioning a new connection`, `SystemError`, and in CI `This session is in
+  'prepared' state` — four messages, one cause. Measured at **75% of 240
+  concurrent reads failing** in-process and **9 of 96 requests returning 500**
+  at concurrency 8 against a live server; both are now **0**. Each request gets
+  its own session via a per-request handle onto the shared engine, closed on
+  every exit path, and the connection pool is sized to the threadpool
+  (`pool_size=40, max_overflow=20`) so per-request sessions cannot trade the
+  corruption for `QueuePool limit ... reached`. `verify_api_key` no longer runs
+  synchronous DB work on the event-loop thread, and the shared raw sqlite3
+  connection now hands out a private cursor under a lock instead of sharing an
+  implicit one. Query results and every endpoint's behaviour are unchanged.
+  Fixes #131.
+
+- Postgres: `ensure_schema()` now creates the full-text-search trigger in every schema it sets up. Its guard asked whether a trigger named `trg_entry_fts` existed anywhere in the cluster, so a second Pyrite instance sharing one database in its own schema silently got no trigger — `entry.fts_vector` was never populated and keyword search returned no results, with no error.
+
+- **A `QUERY_SYNTAX` error names the token the caller wrote instead of leading
+  with SQLite's fragment (#67).** `detention AND third-party-doctrine` reaches
+  MATCH unquoted because the query carries an operator, and SQLite answers
+  `no such column: party` (a piece of a token nobody typed), which sent readers
+  looking for a schema problem. The message now says the token was read as a
+  column reference and shows the quoted form. When the error names a fragment no
+  token of the query contains, the previous text is kept unchanged.
+
+- **One field-projection rule for every read surface (#193).** `?fields=` on the
+  REST routes, the MCP `fields` argument and `--fields` on the CLI now share
+  `pyrite/services/read_shaping.py`: the identity pair (`id`, `kb_name`) is kept
+  in every projection, keys the record does not have are never invented, and the
+  CLI's `--fields` no longer drops the identity pair (that was #192). A
+  parametrised test pins the three surfaces to the same key set for the same
+  request, which nothing did before.
+
+- **Release notes credit contributors whose work landed inside someone else's
+  pull request (#248).** The notes were built from the authors of *merged* PRs
+  only, so a contributor whose PR was closed because another branch carried
+  the same fix first was thanked nowhere — #237 fixed a documented-but-missing
+  command fourteen minutes before #239 merged the identical line, and shipped
+  in 0.24.2 uncredited. `scripts/release.py` now also reads `Co-authored-by:`
+  trailers over the release's own commits, which is the form `CONTRIBUTING.md`
+  already asks for and the only one that survives the merge queue's squash.
+
+- **A no-op load and save keeps each document's block-sequence indentation
+  (#148).** A `links:` block written with its items indented under the key
+  (`sequence=4, offset=2`) came back flush with the key, because the single
+  shared `YAML()` in `pyrite/utils/yaml.py` never set an indent and ruamel's
+  default is `sequence=2, offset=0` -- so a load-and-save with no edit rewrote
+  the file. The dumper now reads the numbers out of the parsed tree's own
+  line/column records, per document, so nothing is reformatted that was not
+  already written that way: hand-written files keep their style, files pyrite
+  wrote keep theirs, and new content is emitted exactly as before. A document
+  that mixes both styles in one file cannot be reproduced -- the emitter takes
+  one setting per document -- and a test says so rather than leaving it
+  unsaid.
+
+- **A route's own page title was always overwritten with the brand name.**
+  The root layout assigned `document.title = brandStore.name` unconditionally
+  in a `$effect`, clobbering whatever `<svelte:head><title>` a route had set,
+  regardless of which finished first — a race against when
+  `/config/branding` returns. The layout now renders `<svelte:head><title>
+  {brandStore.name}</title>` only for the handful of routes that declare no
+  title of their own (`UNTITLED_ROUTES` in `web/src/routes/brand-title-routes.ts`,
+  pinned against the routes on disk by a structural test); every other route
+  never has a layout title effect to be clobbered by. (#49)
+
+- **`social_top` and `social_newest` return only writeups from KBs the caller
+  may read (#223).** Both take `kb_name` optionally, so a call that omitted it
+  read the whole index. A scoped MCP caller was refused those calls rather than
+  served the index (#201) -- safe, but it left the tools unusable for exactly
+  the callers they are meant for. Each handler takes the readable set now and
+  narrows in SQL, so a scoped caller gets a full page of what they may read,
+  and a call that names no KB cannot reach a private one. A named KB binds to
+  that KB, an empty readable set matches nothing, and an unscoped caller
+  (global admin, operator API key, local stdio) is unaffected. This is the
+  first of the six extensions; the rest are still listed in
+  `OPTIONAL_KB_TOOLS`.
+
+- **`sw adrs`, `sw components` and `sw standards` are bounded like
+  `sw backlog` (#238).** Each returned every matching entry -- no
+  `--limit`/`--offset` on the command, no bound on the MCP tool behind it -- so
+  on a KB with a few hundred ADRs or components one call could carry the lot
+  with no way to page. All six now take the `kb_list_entries` shape: a default
+  bound of 50, `--limit 0` (or `limit: null`) for the full list, and `total`,
+  `limit`, `offset` and `has_more` on the MCP response. The filter
+  (`--status`, `--kind`, `--category`, `path`/`name`) is applied **before** the
+  bound, so a filtered page cannot lose a match that sorted past the cut.
+
+- **Every `sw_*` read surface returns only rows from KBs the caller may read
+  (#223).** Twelve tools in `extensions/software-kb` take `kb_name` optionally
+  -- `sw_adrs`, `sw_backlog`, `sw_board`, `sw_component`, `sw_conventions`,
+  `sw_create_adr`, `sw_epics`, `sw_milestones`, `sw_pull_next`,
+  `sw_review_queue`, `sw_standards`, `sw_validations` -- so a call that omitted
+  it spanned every KB, and a scoped caller was refused such calls rather than
+  served the index. Each query now narrows through the same `kb_scope_clause`
+  the other extensions use: a named KB binds to it, a readable set narrows to
+  itself, an empty set matches nothing, and an unscoped caller (global admin,
+  operator API key, local stdio) is unchanged.
+
+- **The task commands can see a KB that is registered in the database (#245).**
+  `kb create` and `kb add` register a KB in the database registry, and every
+  other CLI path merges that registry into the config before use. The task
+  commands read the YAML config directly, so a registered KB answered
+  `KB_NOT_FOUND` from `task create` while `kb list` still showed it — success
+  and discoverability both lying about write-readiness. They now go through the
+  same shared loader as the rest of the CLI.
+
+- **`created_at`/`updated_at`: a file that carried them keeps them, a file
+  that did not never grows them.** `_base_frontmatter` re-emits the two keys
+  only for entries loaded from a file that had them, as second-precision
+  timestamps (`updated_at` only when the caller did not supply one); the
+  internal stamp goes through `Entry.touch_updated_at()` so bookkeeping is
+  not mistaken for a user edit; and unchanged values keep their source node,
+  so a `created_at: 2026-01-15` stays a bare date instead of being rewritten
+  as a timestamp, and a value the loader cannot parse (`created_at:` with no
+  value, `''`, `Jan 15 2026`) is kept exactly as written rather than replaced
+  with the load time (#151).
+
+- **`pyrite update -f` parses its value the same way `create -f` does (#231).**
+  The update path coerced ints only, so `-f tags=alpha,beta` wrote the raw
+  string; the reader then iterated it as a sequence and tagged the entry with
+  the characters of the value, silently dropping it out of tag search,
+  `pyrite tags` and every tag-filtered view. Comma-separated lists, JSON arrays
+  and objects, floats and booleans now parse identically on both write commands.
+
+- **`wiki_stubs`, `wiki_review_queue` and `wiki_quality_stats` return only
+  articles from KBs the caller may read (#223).** All three take `kb_name`
+  optionally, so a call that omitted it spanned every KB; a scoped caller was
+  refused those calls rather than served the index (#201), which left the tools
+  unusable for exactly the callers they are meant for. Each passes the caller's
+  readable set into the query -- the same `kb_scope_clause` the social tools
+  use -- so the lists and counts describe what the caller may read, and an
+  empty set matches nothing instead of everything. Unscoped callers (global
+  admin, operator API key, local stdio) are unchanged.
+
+- **`zettel_inbox` returns only notes from KBs the caller may read (#223).**
+  `kb_name` is optional on the tool, so a call that omitted it read every KB; a
+  scoped caller was refused that call outright rather than served the index
+  (#201), which left it unusable for exactly the callers it is meant for. The
+  handler takes the caller's readable set now and passes it to
+  `list_entries(kb_names=...)`, so the storage query narrows rather than the
+  page afterwards -- and an empty set matches nothing instead of everything.
+  Unscoped callers (global admin, operator API key, local stdio) are unchanged.
+
+### Security
+
+- **The web clipper re-validates every redirect hop, not just the URL it was
+  handed (#219).** `_check_url_safe` refused loopback, link-local, RFC1918 and
+  reserved addresses for the first request, and httpx then followed
+  `follow_redirects=True` without checking where it landed: a public host could
+  answer `302 Location: http://127.0.0.1:8000/api/kbs`, or the cloud metadata
+  address, and the clipper returned the internal response to the caller. A
+  request hook now runs the same check for every request in the chain, and the
+  refusal is the same `ClipperBlockedHostError` a directly blocked URL raises,
+  so the two cannot be told apart.
+
+- **The link-discovery routes read every KB a call names, and return
+  candidates only from KBs the caller may read (#186).**
+  `GET /api/links/discover-neighbors` takes `target_kb` and
+  `GET /api/links/batch-suggest` takes `source_kb`/`target_kb`, names the
+  per-KB read check in `pyrite/server/api.py` did not look at: a caller could
+  name a readable KB and still be served from a private one. Both names are
+  resolved like `kb`/`kb_name` now, and
+  `LinkDiscoveryService.discover_neighbors`/`batch_suggest` take the caller's
+  readable set, so omitting `target_kb` -- which makes the underlying search
+  span every KB -- can no longer hand back a private KB's entry as a
+  suggestion. The `/mcp` tools `kb_discover_neighbors` and `kb_batch_suggest`
+  take the same set, so both surfaces answer alike. Nothing is required of an
+  operator.
+
+- **The second, dead `git pull` implementation in `pyrite/github_auth.py` is
+  gone, so no unredacted git error text can reach a caller through it (#185).**
+  `pull_repo` returned `f"Pull failed: {result.stderr}"` with only the token
+  replaced: absolute paths, and whatever else git chose to print, went out
+  unredacted, bypassing the path redaction `GitService.sanitize_error` applies.
+  Nothing called it — `git grep pull_repo` found only the definition — so there
+  is no behaviour change and nothing for an operator to do. A test now pins its
+  absence the same way the removed `clone_private_repo` is pinned.
+
 ## [0.24.3] - 2026-09-20
 
 "Operational" — see `kb/roadmap.md`.
