@@ -836,8 +836,17 @@ def _apply_env_overrides(config: PyriteConfig) -> None:
 
     if val := env("PYRITE_HOST"):
         config.settings.host = val
-    if val := env("PYRITE_PORT"):
-        config.settings.port = int(val)
+    # Port precedence: PYRITE_PORT > PORT > config/default.
+    # PORT is what Railway/Heroku inject; PYRITE_PORT stays the
+    # explicit override so a compose file can pin a port even when
+    # the platform also sets PORT.
+    raw_port = env("PYRITE_PORT") or env("PORT")
+    if raw_port:
+        try:
+            config.settings.port = int(raw_port)
+        except ValueError as exc:
+            source = "PYRITE_PORT" if env("PYRITE_PORT") else "PORT"
+            raise ValueError(f"{source} must be an integer port, got {raw_port!r}") from exc
     if val := env("PYRITE_AUTH_ENABLED"):
         config.settings.auth.enabled = val.lower() in ("true", "1", "yes")
     if val := env("PYRITE_AUTH_ANONYMOUS_TIER"):

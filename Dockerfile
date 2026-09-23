@@ -53,6 +53,9 @@ RUN useradd --create-home --shell /bin/bash pyrite
 # Data directory for volumes
 ENV PYRITE_DATA_DIR=/data
 ENV PYRITE_STATIC_DIR=/app/web/dist
+# Bind all interfaces in the image. Local `pyrite serve` still defaults
+# to 127.0.0.1 because this ENV only applies inside the container.
+ENV PYRITE_HOST=0.0.0.0
 RUN mkdir -p /data && chown pyrite:pyrite /data
 VOLUME /data
 
@@ -61,6 +64,6 @@ USER pyrite
 EXPOSE 8088
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8088/health')" || exit 1
+    CMD python -c "import os,urllib.request; p=os.environ.get('PYRITE_PORT') or os.environ.get('PORT') or '8088'; urllib.request.urlopen(f'http://127.0.0.1:{p}/health')" || exit 1
 
 CMD ["pyrite-server"]
