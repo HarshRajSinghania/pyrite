@@ -3,6 +3,7 @@
 import os
 from unittest.mock import patch
 
+import pytest
 from pyrite.config import PyriteConfig, _apply_env_overrides
 
 
@@ -142,6 +143,46 @@ class TestEnvOverrides:
 
         assert config.settings.auth.anonymous_tier == "read"
 
+    def test_port_env_falls_back_to_platform_port(self):
+        """Railway/Heroku inject PORT; honour it when PYRITE_PORT is unset."""
+        config = PyriteConfig()
+        env_copy = {k: v for k, v in os.environ.items() if k not in ("PYRITE_PORT", "PORT")}
+        env_copy["PORT"] = "3000"
+        with patch.dict(os.environ, env_copy, clear=True):
+            _apply_env_overrides(config)
+        assert config.settings.port == 3000
+
+    def test_pyrite_port_wins_over_platform_port(self):
+        """Explicit PYRITE_PORT takes precedence over PORT."""
+        config = PyriteConfig()
+        with patch.dict(os.environ, {"PORT": "3000", "PYRITE_PORT": "9090"}):
+            _apply_env_overrides(config)
+        assert config.settings.port == 9090
+
+    def test_invalid_port_raises_clear_error(self):
+        config = PyriteConfig()
+        env_copy = {k: v for k, v in os.environ.items() if k != "PYRITE_PORT"}
+        env_copy["PORT"] = "not-a-port"
+        with patch.dict(os.environ, env_copy, clear=True):
+            with pytest.raises(ValueError, match=r"PORT.*not-a-port"):
+                _apply_env_overrides(config)
+
+    def test_invalid_pyrite_port_raises_clear_error(self):
+        config = PyriteConfig()
+        with patch.dict(os.environ, {"PYRITE_PORT": "80abc"}):
+            with pytest.raises(ValueError, match="PYRITE_PORT"):
+                _apply_env_overrides(config)
+
+    def test_no_env_keeps_loopback_defaults(self):
+        config = PyriteConfig()
+        env_copy = {
+            k: v for k, v in os.environ.items() if k not in ("PYRITE_HOST", "PYRITE_PORT", "PORT")
+        }
+        with patch.dict(os.environ, env_copy, clear=True):
+            _apply_env_overrides(config)
+        assert config.settings.host == "127.0.0.1"
+        assert config.settings.port == 8088
+
     def test_load_config_applies_env_overrides(self, tmp_path, monkeypatch):
         """load_config() should call _apply_env_overrides."""
         monkeypatch.setenv("PYRITE_HOST", "0.0.0.0")
@@ -192,3 +233,12 @@ class TestDockerignoreExcludesNestedNodeModules:
         """A bare `node_modules` beside the recursive one is not wrong, but it
         is the pattern that caused this, so its absence is what we assert."""
         assert "node_modules" not in self._patterns()
+
+
+class TestDockerfileBindsAllInterfaces:
+    def test_dockerfile_sets_pyrite_host(self):
+        from pathlib import Path
+
+        dockerfile = Path(__file__).resolve().parent.parent / "Dockerfile"
+        contents = dockerfile.read_text()
+        assert "ENV PYRITE_HOST=0.0.0.0" in contents

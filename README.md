@@ -265,6 +265,8 @@ fly deploy
 
 All three platforms use the included Dockerfile, persist data at `/data`, and expose port 8088. Set `PYRITE_AUTH_ENABLED`, `PYRITE_OPENAI_API_KEY`, and other env vars in your platform's dashboard after deploy.
 
+The container image binds `0.0.0.0` (`PYRITE_HOST`) and honours the platform `$PORT` when `PYRITE_PORT` is unset (`PYRITE_PORT` wins if both are set). Railway does not attach a persistent volume from the one-click button — add a volume mounted at `/data` in the Railway dashboard after the first deploy, or data will not survive restarts.
+
 ### Self-Hosted VPS
 
 Run your own Pyrite instance on any VPS ($6/month, unlimited users, you own your data):
