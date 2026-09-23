@@ -903,6 +903,11 @@ WRITE_TOOLS = {
                     "items": {"type": "string"},
                     "description": "Dependency entry IDs",
                 },
+                "tags": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Tags for the new task",
+                },
             },
             "required": ["kb_name", "title"],
         },

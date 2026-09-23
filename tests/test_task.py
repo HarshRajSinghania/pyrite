@@ -706,6 +706,13 @@ class TestMCPToolSchemas:
         assert "kb_name" in schema["required"]
         assert "title" in schema["required"]
 
+    def test_task_create_schema_includes_optional_tags(self):
+        schema = WRITE_TOOLS["task_create"]["inputSchema"]
+        tags = schema["properties"]["tags"]
+        assert tags["type"] == "array"
+        assert tags["items"] == {"type": "string"}
+        assert "tags" not in schema["required"]
+
     def test_task_claim_requires_all_fields(self):
         schema = WRITE_TOOLS["task_claim"]["inputSchema"]
         assert set(schema["required"]) == {"task_id", "kb_name", "assignee"}
@@ -756,3 +763,71 @@ class TestEnums:
         assert "failed" in TASK_STATUSES
         assert "cancelled" in TASK_STATUSES
         assert len(TASK_STATUSES) == 8
+
+
+# =========================================================================
+# MCP task_create tags
+# =========================================================================
+
+
+class TestMCPTaskCreateTags:
+    """Acceptance tests for issue #319: MCP task_create forwards tags."""
+
+    def _server(self, tmp_path):
+        from pyrite.config import KBConfig, PyriteConfig, Settings
+        from pyrite.server.mcp_server import PyriteMCPServer
+        from pyrite.storage.database import PyriteDB
+
+        tasks_path = tmp_path / "tasks-kb"
+        (tasks_path / "tasks").mkdir(parents=True)
+        kb_config = KBConfig(
+            name="test-tasks",
+            path=tasks_path,
+            kb_type="task",
+            description="Test task KB",
+        )
+        config = PyriteConfig(
+            knowledge_bases=[kb_config],
+            settings=Settings(index_path=tmp_path / "index.db"),
+        )
+        db = PyriteDB(config.settings.index_path)
+        db.register_kb(
+            name="test-tasks",
+            kb_type="task",
+            path=str(tasks_path),
+            description="Test task KB",
+        )
+        db.close()
+        server = PyriteMCPServer(config=config, tier="write")
+        return server, kb_config
+
+    def test_task_create_handler_writes_tags_frontmatter(self, tmp_path):
+        from pyrite.storage.repository import KBRepository
+
+        server, kb_config = self._server(tmp_path)
+        result = server._task_create(
+            {
+                "kb_name": "test-tasks",
+                "title": "Tagged via MCP",
+                "tags": ["alpha", "beta"],
+            }
+        )
+        assert result.get("created") is True
+        entry = KBRepository(kb_config).load(result["entry_id"])
+        assert entry.tags == ["alpha", "beta"]
+
+    def test_task_create_handler_omits_tags_when_absent(self, tmp_path):
+        from pyrite.storage.repository import KBRepository
+
+        server, kb_config = self._server(tmp_path)
+        result = server._task_create(
+            {
+                "kb_name": "test-tasks",
+                "title": "Untagged via MCP",
+            }
+        )
+        assert result.get("created") is True
+        entry = KBRepository(kb_config).load(result["entry_id"])
+        assert not entry.tags
+        frontmatter = entry.to_frontmatter()
+        assert "tags" not in frontmatter or not frontmatter.get("tags")

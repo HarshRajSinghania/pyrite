@@ -1519,6 +1519,7 @@ class PyriteMCPServer:
             priority=args.get("priority", 5),
             assignee=args.get("assignee", ""),
             dependencies=args.get("dependencies"),
+            tags=args.get("tags"),
         )
 
     def _task_update(self, args: dict[str, Any]) -> dict[str, Any]:
