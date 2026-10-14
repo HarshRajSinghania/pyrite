@@ -29,7 +29,7 @@ def test_schema_validate_hook_refuses_package_directory(tmp_path):
     result = subprocess.run(
         ["bash", "-c", _schema_hook_entry()],
         cwd=tmp_path,
-        env={"PATH": f".:/usr/bin:/bin", "HOME": str(tmp_path)},
+        env={"PATH": ".:/usr/bin:/bin", "HOME": str(tmp_path)},
         capture_output=True,
         text=True,
     )
@@ -44,9 +44,7 @@ def test_schema_validate_hook_runs_executable_on_path(tmp_path):
     bindir.mkdir()
     script = bindir / "pyrite"
     script.write_text(
-        "#!/bin/sh\n"
-        "echo called > \"$PWD/called\"\n"
-        "printf '%s\\n' \"$@\" >> \"$PWD/called\"\n"
+        '#!/bin/sh\necho called > "$PWD/called"\nprintf \'%s\\n\' "$@" >> "$PWD/called"\n'
     )
     script.chmod(0o755)
     work = tmp_path / "work"
