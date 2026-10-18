@@ -1,1 +1,1 @@
-$(cat /tmp/pyrite/pyrite/utils/errors.py)
+PLACEHOLDER_CONTENT_TO_BE_REPLACED
