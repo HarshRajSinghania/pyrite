@@ -56,6 +56,7 @@ jobs:
   # everything: it only moves to a SHA this workflow has proven.
   # ===========================================================================
   changes:
+    timeout-minutes: 10
     runs-on: ubuntu-latest
     # dorny/paths-filter reads the PR's changed-files list on pull_request
     # events, which needs pull-requests: read beyond the workflow default.
@@ -161,6 +162,7 @@ jobs:
               - 'web/**'
               - '.github/workflows/**'
             kb:
+    timeout-minutes: 10
               - 'kb/**'
             # A change here is a property of the INTERPRETER and pytest
             # version, not of the project's own logic -- a single-interpreter
@@ -514,6 +516,7 @@ jobs:
   # refreshes the balance; nothing depends on that for correctness.
   # ===========================================================================
   shard-report:
+    timeout-minutes: 15
     needs: [changes, test, collect]
     if: ${{ !cancelled() && needs.test.result != 'skipped' }}
     runs-on: ubuntu-latest
@@ -592,6 +595,7 @@ jobs:
   # is the job's own conclusion plus its annotations.
   # ===========================================================================
   mypy:
+    timeout-minutes: 15
     name: mypy (advisory)
     needs: changes
     if: (needs.changes.outputs.backend == 'true' || github.ref == 'refs/heads/main') && needs.changes.outputs.queue_passed != 'true'
@@ -701,6 +705,7 @@ jobs:
   # parallel with backend. r1900 web-tests-in-ci.
   # ===========================================================================
   frontend:
+    timeout-minutes: 20
     needs: changes
     if: (needs.changes.outputs.web == 'true' || github.ref == 'refs/heads/main') && needs.changes.outputs.queue_passed != 'true'
     runs-on: ubuntu-latest
@@ -1116,6 +1121,7 @@ jobs:
   # workflow's own token; a pull request's run reports in its job summary and
   # can write nothing.
   experimental-issues:
+    timeout-minutes: 10
     needs: experimental
     if: >-
       ${{ always()
@@ -1156,6 +1162,7 @@ jobs:
   # is what the classifier means by it.
   # ===========================================================================
   gate:
+    timeout-minutes: 10
     needs: [changes, kb, test, shard-report, frontend]
     if: always()
     runs-on: ubuntu-latest
