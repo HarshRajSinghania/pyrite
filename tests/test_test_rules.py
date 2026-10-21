@@ -331,13 +331,17 @@ def test_pytest_config_bounds_every_test_and_dumps_stacks():
     assert 0 < opts["faulthandler_timeout"] < opts["timeout"]
 
 
-def test_ci_pytest_jobs_have_a_job_timeout():
+def test_ci_jobs_have_a_job_timeout():
     import yaml
 
     jobs = yaml.safe_load((ROOT / ".github" / "workflows" / "ci.yml").read_text())["jobs"]
+    missing = []
     for name, job in jobs.items():
-        runs_pytest = any("pytest" in str(step.get("run", "")) for step in job.get("steps", []))
-        if runs_pytest:
-            assert "timeout-minutes" in job, (
-                f"ci.yml job {name!r} runs pytest with no timeout-minutes"
-            )
+        # Reusable-workflow jobs (`uses:` at job level) cannot take timeout-minutes.
+        if "uses" in job:
+            continue
+        if "timeout-minutes" not in job:
+            missing.append(name)
+    assert not missing, (
+        f"ci.yml jobs missing timeout-minutes: {missing}"
+    )
