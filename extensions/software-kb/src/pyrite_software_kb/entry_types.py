@@ -1,4 +1,5 @@
 """Software KB entry types."""
+from pyrite.utils.parse import safe_int
 
 from dataclasses import dataclass, field
 from typing import Any, ClassVar
@@ -89,7 +90,7 @@ class ADREntry(Statusable, Temporal, NoteEntry):
         kwargs = cls._base_kwargs(meta, body)
         return cls(
             **kwargs,
-            adr_number=int(meta.get("adr_number", 0)),
+            adr_number=safe_int(meta.get("adr_number", 0)),
             status=meta.get("status", "proposed"),
             deciders=meta.get("deciders", []) or [],
             date=meta.get("date", ""),
@@ -304,7 +305,7 @@ class BacklogItemEntry(Assignable, Statusable, NoteEntry):
             priority=meta.get("priority", "medium"),
             assignee=meta.get("assignee", ""),
             effort=meta.get("effort", ""),
-            rank=int(meta.get("rank", 0)),
+            rank=safe_int(meta.get("rank", 0)),
         )
 
 
