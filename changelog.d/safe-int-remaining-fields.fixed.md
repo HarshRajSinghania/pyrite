@@ -1,0 +1,1 @@
+Integer fields read from frontmatter or metadata (`_schema_version` in QA and migration, social `reputation`/`writeup_count`, software-kb `adr_number`/`rank`, and plugin rank reads) now go through `safe_int` so non-finite or non-numeric values return the default instead of raising (#1247).

@@ -5,10 +5,13 @@ from collections.abc import Callable
 from datetime import UTC
 from typing import Any, ClassVar
 
+from pyrite.exceptions import PyriteError, public_text
 from pyrite.plugins.capabilities import Capability
 from pyrite.plugins.scoping import kb_scope_clause
 from pyrite.schema import generate_entry_id
+from pyrite.utils.parse import safe_int
 
+from .adr_listing import adr_relations, adr_sort_key
 from .entry_types import (
     ADREntry,
     BacklogItemEntry,
@@ -26,6 +29,9 @@ from .validators import validate_software_kb
 from .workflows import ADR_LIFECYCLE, BACKLOG_WORKFLOW
 
 logger = logging.getLogger(__name__)
+# Under `pyrite`, where configure_logging puts the handler: a record on this
+# module's own logger would fall to the last-resort handler (#848).
+_masked_log = logging.getLogger("pyrite.ext.software_kb")
 
 
 def _safe_error(e: Exception) -> str:
@@ -38,11 +44,7 @@ def _safe_error(e: Exception) -> str:
     path, a driver's own text. public_message, when set, is what every
     other transport already shows; the real detail still reaches the log.
     """
-    public_message = getattr(e, "public_message", None)
-    if public_message is not None:
-        logger.warning("%s", e)
-        return public_message
-    return str(e)
+    return public_text(e, log=_masked_log)
 
 
 # Default page size for list-shaped sw_* surfaces (#233). These commands are
@@ -83,11 +85,20 @@ class SoftwareKBPlugin:
         """Get DB from injected context, falling back to self-bootstrap."""
         if self.ctx is not None:
             return self.ctx.db, False
-        from pyrite.config import load_config
         from pyrite.storage.database import PyriteDB
 
-        config = load_config()
-        return PyriteDB(config.settings.index_path), True
+        return PyriteDB(self._get_config().settings.index_path), True
+
+    def _get_config(self):
+        """The server's config from the injected context; the process's own
+        only when there is no context (the CLI). A handler never loads a
+        config of its own: a KB resolved against another config than the
+        server's loses the attributes config.yaml gives it (#952)."""
+        if self.ctx is not None:
+            return self.ctx.config
+        from pyrite.config import load_config
+
+        return load_config()
 
     def get_entry_types(self) -> dict[str, type]:
         return {
@@ -631,6 +642,14 @@ class SoftwareKBPlugin:
                 "inverse": "implements",
                 "description": "Component implements a design doc",
             },
+            "amends": {
+                "inverse": "amended_by",
+                "description": "A later ADR amends an earlier one",
+            },
+            "amended_by": {
+                "inverse": "amends",
+                "description": "An ADR is amended by a later one",
+            },
             "supersedes": {
                 "inverse": "superseded_by",
                 "description": "New ADR supersedes an old one",
@@ -711,12 +730,7 @@ class SoftwareKBPlugin:
     def _mcp_adrs(
         self, args: dict[str, Any], *, readable_kbs: set[str] | None = None
     ) -> dict[str, Any]:
-        """List ADRs, bounded by `limit`/`offset`.
-
-        The status filter runs against the full result set and the bound is
-        applied after it (#233): limiting first would cut the list before the
-        filter and hand back the wrong page.
-        """
+        """List ADRs in number order with their visible standing relations."""
         import json
 
         db, should_close = self._get_db()
@@ -729,10 +743,7 @@ class SoftwareKBPlugin:
             query = "SELECT * FROM entry WHERE entry_type = 'adr'"
             clause, scope_params = kb_scope_clause("kb_name", kb_name, readable_kbs)
             query += clause
-            params = list(scope_params)
-            query += " ORDER BY created_at DESC"
-
-            rows = db._raw_conn.execute(query, params).fetchall()
+            rows = db._raw_conn.execute(query, list(scope_params)).fetchall()
             adrs = []
             for row in rows:
                 meta = {}
@@ -755,8 +766,11 @@ class SoftwareKBPlugin:
                     }
                 )
 
+            adrs.sort(key=adr_sort_key)
             total = len(adrs)
             page = adrs[offset : offset + limit] if limit is not None else adrs[offset:]
+            for adr in page:
+                adr["relations"] = adr_relations(db, adr, readable_kbs=readable_kbs)
 
             return {
                 "count": len(page),
@@ -1042,7 +1056,7 @@ class SoftwareKBPlugin:
                 priority = row["priority"] or meta.get("priority", "medium")
                 kind = meta.get("kind", "")
                 assignee = row["assignee"] or meta.get("assignee", "")
-                rank = int(meta.get("rank", 0))
+                rank = safe_int(meta.get("rank", 0))
                 if status_filter and status != status_filter:
                     continue
                 if priority_filter and priority != priority_filter:
@@ -1290,10 +1304,9 @@ class SoftwareKBPlugin:
         before_id = args.get("before")
 
         try:
-            from pyrite.config import load_config
             from pyrite.services.kb_service import KBService
 
-            config = load_config()
+            config = self._get_config()
             svc = KBService(config, db)
 
             if item_ids:
@@ -1324,7 +1337,7 @@ class SoftwareKBPlugin:
                             anchor_meta = json.loads(anchor_row["metadata"])
                         except (json.JSONDecodeError, TypeError):
                             pass
-                    anchor_rank = int(anchor_meta.get("rank", 0))
+                    anchor_rank = safe_int(anchor_meta.get("rank", 0))
                     # --after: start at anchor + 100. --before: start at
                     # max(1, anchor - 100*N) so the highest item lands just
                     # before the anchor.
@@ -1373,7 +1386,7 @@ class SoftwareKBPlugin:
                         anchor_meta = json.loads(anchor_row["metadata"])
                     except (json.JSONDecodeError, TypeError):
                         pass
-                anchor_rank = int(anchor_meta.get("rank", 0))
+                anchor_rank = safe_int(anchor_meta.get("rank", 0))
 
                 if after_id:
                     # Place after: new_rank = anchor_rank + 50 (midpoint to next)
@@ -1478,9 +1491,7 @@ class SoftwareKBPlugin:
             board_config = {"lanes": [], "wip_policy": "warn"}
             try:
                 if self.ctx is not None:
-                    from pyrite.config import load_config
-
-                    config = load_config()
+                    config = self._get_config()
                     kb_conf = config.get_kb(kb_name)
                     if kb_conf:
                         board_config = load_board_config(kb_conf.path)
@@ -1659,9 +1670,7 @@ class SoftwareKBPlugin:
         try:
             # Load board config
             if self.ctx is not None and kb_name:
-                from pyrite.config import load_config
-
-                config = load_config()
+                config = self._get_config()
                 kb_conf = config.get_kb(kb_name)
                 board_config = (
                     load_board_config(kb_conf.path) if kb_conf else load_board_config(Path("."))
@@ -1732,60 +1741,44 @@ class SoftwareKBPlugin:
     def _mcp_create_adr(
         self, args: dict[str, Any], *, readable_kbs: set[str] | None = None
     ) -> dict[str, Any]:
-        """Create a new ADR with auto-numbering."""
-        import json
+        """Create a new ADR with auto-numbering from files (#1082, #1175)."""
+        from .adr_listing import next_adr_number, resolve_adr_kb
 
-        db, should_close = self._get_db()
+        config = self._get_config()
         kb_name = args.get("kb_name")
-
-        try:
-            # Find next ADR number
-            query = "SELECT * FROM entry WHERE entry_type = 'adr'"
-            clause, scope_params = kb_scope_clause("kb_name", kb_name, readable_kbs)
-            query += clause
-            params = list(scope_params)
-            rows = db._raw_conn.execute(query, params).fetchall()
-
-            max_num = 0
-            for row in rows:
-                meta = {}
-                if row["metadata"]:
-                    try:
-                        meta = json.loads(row["metadata"])
-                    except (json.JSONDecodeError, TypeError):
-                        pass
-                num = meta.get("adr_number", 0)
-                if isinstance(num, int) and num > max_num:
-                    max_num = num
-
-            next_num = max_num + 1
-            title = args["title"]
-            slug = generate_entry_id(title)
-            status = args.get("status", "proposed")
-
-            # Build structured body
-            context = args.get("context", "")
-            decision = args.get("decision", "")
-            consequences = args.get("consequences", "")
-            body_parts = []
-            body_parts.append(f"## Context\n\n{context or 'TODO'}")
-            body_parts.append(f"## Decision\n\n{decision or 'TODO'}")
-            body_parts.append(f"## Consequences\n\n{consequences or 'TODO'}")
-            body = "\n\n".join(body_parts)
-
+        kb_conf = resolve_adr_kb(config, kb_name, readable_kbs=readable_kbs)
+        if kb_conf is None:
             return {
-                "created": True,
-                "adr_number": next_num,
-                "title": title,
-                "status": status,
-                "filename": f"adrs/{next_num:04d}-{slug}.md",
-                "body": body,
-                "deciders": args.get("deciders", []),
-                "note": "Create the markdown file with this frontmatter and body to complete.",
+                "created": False,
+                "error": "No KB resolved for the ADR (pass kb_name).",
+                "error_code": "KB_NOT_FOUND" if kb_name else "VALIDATION_FAILED",
             }
-        finally:
-            if should_close:
-                db.close()
+
+        next_num = next_adr_number(kb_conf)
+        title = args["title"]
+        slug = generate_entry_id(title)
+        status = args.get("status", "proposed")
+
+        # Build structured body
+        context = args.get("context", "")
+        decision = args.get("decision", "")
+        consequences = args.get("consequences", "")
+        body_parts = []
+        body_parts.append(f"## Context\n\n{context or 'TODO'}")
+        body_parts.append(f"## Decision\n\n{decision or 'TODO'}")
+        body_parts.append(f"## Consequences\n\n{consequences or 'TODO'}")
+        body = "\n\n".join(body_parts)
+
+        return {
+            "created": True,
+            "adr_number": next_num,
+            "title": title,
+            "status": status,
+            "filename": f"adrs/{next_num:04d}-{slug}.md",
+            "body": body,
+            "deciders": args.get("deciders", []),
+            "note": "Create the markdown file with this frontmatter and body to complete.",
+        }
 
     def _mcp_review_queue(
         self, args: dict[str, Any], *, readable_kbs: set[str] | None = None
@@ -1845,9 +1838,7 @@ class SoftwareKBPlugin:
             wip_limit = None
             try:
                 if self.ctx is not None and kb_name:
-                    from pyrite.config import load_config
-
-                    config = load_config()
+                    config = self._get_config()
                     kb_conf = config.get_kb(kb_name)
                     board_config = (
                         load_board_config(kb_conf.path) if kb_conf else load_board_config(Path("."))
@@ -2194,9 +2185,7 @@ class SoftwareKBPlugin:
         from .board import load_board_config
 
         try:
-            from pyrite.config import load_config as _load_config
-
-            cfg = _load_config()
+            cfg = self._get_config()
             kb_conf = cfg.get_kb(kb_name) if kb_name else None
             if kb_conf:
                 return load_board_config(kb_conf.path)
@@ -2463,9 +2452,7 @@ class SoftwareKBPlugin:
             # Load board config for WIP limits
             try:
                 if self.ctx is not None and kb_name:
-                    from pyrite.config import load_config
-
-                    config = load_config()
+                    config = self._get_config()
                     kb_conf = config.get_kb(kb_name)
                     board_config = (
                         load_board_config(kb_conf.path) if kb_conf else load_board_config(Path("."))
@@ -2526,7 +2513,7 @@ class SoftwareKBPlugin:
                 if status != "accepted":
                     continue
                 priority = row["priority"] or meta.get("priority", "medium")
-                item_rank = int(meta.get("rank", 0))
+                item_rank = safe_int(meta.get("rank", 0))
                 candidates.append(
                     {
                         "id": row["id"],
@@ -2680,9 +2667,7 @@ class SoftwareKBPlugin:
 
             board_config = {"lanes": [], "wip_policy": "warn"}
             try:
-                from pyrite.config import load_config as _load_config
-
-                cfg = _load_config()
+                cfg = self._get_config()
                 kb_conf = cfg.get_kb(kb_name)
                 if kb_conf:
                     board_config = load_board_config(kb_conf.path)
@@ -2698,10 +2683,9 @@ class SoftwareKBPlugin:
                 return {"claimed": False, "error": "Gate check failed", "gate": gate_result}
 
             # Use KBService CAS pattern
-            from pyrite.config import load_config
             from pyrite.services.kb_service import KBService
 
-            config = load_config()
+            config = self._get_config()
             svc = KBService(config, db)
             result = svc.claim_entry(
                 item_id,
@@ -2759,10 +2743,9 @@ class SoftwareKBPlugin:
                 }
 
             # Use KBService CAS — preserve current assignee
-            from pyrite.config import load_config
             from pyrite.services.kb_service import KBService
 
-            config = load_config()
+            config = self._get_config()
             svc = KBService(config, db)
             current_assignee = row["assignee"] or meta.get("assignee", "")
             cas_result = svc.claim_entry(
@@ -2851,9 +2834,7 @@ class SoftwareKBPlugin:
 
             board_config = {"lanes": [], "wip_policy": "warn"}
             try:
-                from pyrite.config import load_config as _load_config
-
-                cfg = _load_config()
+                cfg = self._get_config()
                 kb_conf = cfg.get_kb(kb_name)
                 if kb_conf:
                     board_config = load_board_config(kb_conf.path)
@@ -2873,10 +2854,9 @@ class SoftwareKBPlugin:
                 }
 
             # Use KBService CAS pattern — preserve current assignee
-            from pyrite.config import load_config
             from pyrite.services.kb_service import KBService
 
-            config = load_config()
+            config = self._get_config()
             svc = KBService(config, db)
             current_assignee = row["assignee"] or meta.get("assignee", "")
             cas_result = svc.claim_entry(
@@ -2984,10 +2964,9 @@ class SoftwareKBPlugin:
                     }
 
             # Use KBService CAS pattern — pass current assignee to preserve it
-            from pyrite.config import load_config
             from pyrite.services.kb_service import KBService
 
-            config = load_config()
+            config = self._get_config()
             svc = KBService(config, db)
             current_assignee = row["assignee"] or meta.get("assignee", "")
             cas_result = svc.claim_entry(
@@ -3033,7 +3012,6 @@ class SoftwareKBPlugin:
         """Create a new backlog item and persist it to the KB."""
         import re
 
-        from pyrite.config import load_config
         from pyrite.services.kb_service import KBService
 
         title = args["title"]
@@ -3050,7 +3028,7 @@ class SoftwareKBPlugin:
 
         db, should_close = self._get_db()
         try:
-            config = load_config()
+            config = self._get_config()
             svc = KBService(config, db)
 
             kwargs: dict[str, Any] = {
@@ -3075,7 +3053,10 @@ class SoftwareKBPlugin:
                 "effort": effort,
             }
         except Exception as e:
-            return {"created": False, "error": _safe_error(e)}
+            refused: dict[str, Any] = {"created": False, "error": _safe_error(e)}
+            if isinstance(e, PyriteError):
+                refused["error_code"] = e.error_code  # KB_NOT_FOUND, KB_READ_ONLY, ...
+            return refused
         finally:
             if should_close:
                 db.close()
