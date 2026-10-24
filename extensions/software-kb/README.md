@@ -15,38 +15,40 @@ See also the note in [docs/getting-started.md](../../docs/getting-started.md).
 ## Types the software template declares
 
 - **adr** — Architecture Decision Record (with status and adr_number).
-- **backlog-item** — Work item with status and priority (the main workflow type).
-- **component** — Module or service documentation.
-- **design-doc** — Design document or specification.
+- **design_doc** — Design document or specification.
 - **standard** — Coding standard or convention.
-- **validation** — Programmatic check with pass/fail criteria.
-- **convention** — Judgment-based development guidance.
-- **milestone** — Project milestone.
-- **epic** — Grouping of related backlog items.
+- **programmatic_validation** — Programmatic check with pass/fail criteria.
+- **development_convention** — Judgment-based development guidance.
+- **component** — Module or service documentation.
+- **backlog_item** — Work item with status and priority (the main workflow type). Epic is a backlog_item with `kind: epic`.
 - **runbook** — Operational procedure.
-- **work-log** — Record of work done on an item.
+- **milestone** — Project milestone.
+- **work_log** — Record of work done on an item.
 
 ## Backlog lifecycle
 
-Backlog items start as `proposed`. Valid transitions (via `pyrite sw transition <id> <to> -k <kb>` or the dedicated claim/submit/review commands):
+Backlog items start as `proposed`. Valid transitions (via `pyrite sw transition <id> <to> -k <kb>` or the dedicated claim/submit/review commands). Transitions marked *reason* require `--reason`:
 
-| From          | To           | Command / note                          |
-|---------------|--------------|-----------------------------------------|
-| proposed      | planned      | `sw transition`                         |
-| proposed      | accepted     | `sw transition`                         |
-| planned       | accepted     | `sw transition`                         |
-| accepted      | in_progress  | `sw claim` (sets assignee)              |
-| in_progress   | review       | `sw submit`                             |
-| in_progress   | done         | `sw transition`                         |
-| review        | done         | `sw review -o approved`                 |
-| review        | in_progress  | `sw review -o changes_requested`        |
-| done          | retired      | `sw transition`                         |
-| proposed      | deferred     | `sw transition`                         |
-| planned       | deferred     | `sw transition`                         |
-| deferred      | proposed     | `sw transition`                         |
-| proposed      | wont_do      | `sw transition`                         |
-
-Other backward moves (e.g. unclaim) are available via `sw transition`.
+| From          | To           | Command / note                                      |
+|---------------|--------------|-----------------------------------------------------|
+| proposed      | planned      | `sw transition`                                     |
+| proposed      | accepted     | `sw transition`                                     |
+| planned       | accepted     | `sw transition`                                     |
+| accepted      | in_progress  | `sw claim --assignee/-a <name>`                     |
+| in_progress   | review       | `sw submit`                                         |
+| in_progress   | done         | `sw transition`                                     |
+| review        | done         | `sw review <id> -o approved --reviewer <name>`      |
+| review        | in_progress  | `sw review <id> -o changes_requested --reviewer <name> --feedback <text>` *reason* |
+| done          | retired      | `sw transition`                                     |
+| proposed      | deferred     | `sw transition`                                     |
+| planned       | deferred     | `sw transition`                                     |
+| deferred      | proposed     | `sw transition`                                     |
+| proposed      | wont_do      | `sw transition` *reason*                            |
+| accepted      | wont_do      | `sw transition` *reason*                            |
+| accepted      | proposed     | `sw transition` *reason*                            |
+| accepted      | deferred     | `sw transition`                                     |
+| done          | accepted     | `sw transition` *reason* (reopen)                   |
+| in_progress   | accepted     | `sw transition` *reason* (unclaim)                  |
 
 ## Dependencies (blocked_by / blocks)
 
@@ -59,10 +61,8 @@ pyrite link <item> <blocker> -r blocked_by -k <kb>
 The inverse relation is `blocks`.
 
 - `sw pull-next` skips blocked items and lists them under `blocked_items`.
-- MCP `sw_claim` refuses a blocked item (the CLI `sw claim` does not yet; see related issues).
+- today the CLI `sw claim` does not refuse a blocked item; see #1288. MCP `sw_claim` refuses a blocked item.
 - `sw context-for-item` includes the dependency information in the context bundle.
-
-Write "today" where CLI and MCP differ.
 
 ## `sw` commands
 
@@ -71,8 +71,8 @@ Run `pyrite sw --help` for the full list. One-line summaries:
 - `sw adrs` — List Architecture Decision Records.
 - `sw new-adr` — Create a new ADR.
 - `sw backlog` — List backlog items (filter by status, etc.).
-- `sw epics` — List epics.
-- `sw epic-detail` — Show details of an epic.
+- `sw epics` — List epics (backlog items with kind: epic).
+- `sw epic` — Show details of an epic.
 - `sw prioritize` — Adjust priorities.
 - `sw standards` — List standards (validations + conventions).
 - `sw validations` — List programmatic validations.
@@ -81,11 +81,11 @@ Run `pyrite sw --help` for the full list. One-line summaries:
 - `sw milestones` — List milestones with stats.
 - `sw board` — Show the kanban board.
 - `sw review-queue` — Items waiting for review.
-- `sw claim` — Claim an accepted item (moves to in_progress).
+- `sw claim` — Claim an accepted item (moves to in_progress; requires --assignee).
 - `sw submit` — Submit an in_progress item for review.
 - `sw transition` — Transition an item to a new status.
 - `sw pull-next` — Recommend the next unblocked accepted item.
-- `sw review` — Record a review outcome.
+- `sw review` — Record a review outcome (requires --reviewer; changes_requested needs --feedback).
 - `sw log` — Log a work session against an item.
 - `sw components` — List component docs.
 - `sw check-ready` — Check Definition of Ready for an item.
