@@ -35,7 +35,7 @@ from ..models.protocols import (
 from ..schema.field_aliases import lift_declared_fields, read_metadata, read_view
 from ..utils.metadata import parse_metadata
 from .database import PyriteDB
-from .errors import DISK_SUGGESTION, driver_error, is_disk_fault, storage_error_from
+from .errors import driver_error, storage_error_from
 from .repository import KBRepository
 
 logger = logging.getLogger(__name__)
@@ -67,13 +67,12 @@ def _storage_error_for_write(exc: BaseException, rel: str, db: PyriteDB) -> Stor
     except Exception:  # pragma: no cover - defensive: the session may be gone
         logger.debug("Rollback after a failed index write failed", exc_info=True)
     if isinstance(exc, StorageError):
-        err = exc
-    else:
-        # The first line only: a driver error carries the SQL and every bound value.
-        err = storage_error_from(driver_error(exc), f"The index refused the row for {rel}")
-        err.args = ((str(err).splitlines() or [type(exc).__name__])[0],)
-    if not err.suggestion:
-        err.suggestion = DISK_SUGGESTION if is_disk_fault(exc) else WRITE_RETRY_SUGGESTION
+        return exc
+    # The first line only: a driver error carries the SQL and every bound value.
+    err = storage_error_from(
+        driver_error(exc), f"The index refused the row for {rel}", suggestion=WRITE_RETRY_SUGGESTION
+    )
+    err.args = ((str(err).splitlines() or [type(exc).__name__])[0],)
     return err
 
 

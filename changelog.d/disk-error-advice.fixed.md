@@ -1,0 +1,1 @@
+- Disk errors now include recovery advice even when the caller supplies no suggestion. Search failures point to file permissions and disk space instead of omitting the advice (#1317).
