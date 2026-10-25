@@ -304,6 +304,8 @@ def sw_backlog(
     require_kb(load_config(), kb_name, output_format=fmt)
     from .plugin import DEFAULT_LIST_LIMIT, SoftwareKBPlugin
 
+    if epic:
+        kb_name = require_entry_kb(epic, kb_name, entry_type="backlog_item", output_format=fmt)
     plugin = SoftwareKBPlugin()
     effective_limit = DEFAULT_LIST_LIMIT if limit is None else (None if limit <= 0 else limit)
     result = plugin._mcp_backlog(

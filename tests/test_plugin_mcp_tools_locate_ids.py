@@ -41,8 +41,8 @@ _ID_HELP = re.compile(r"\b(entry|item|article|writeup|claim|epic|task)\s+ids?\b"
 #: Tools the walk finds that take an id and act on no entry it names; each
 #: names its reason and, for a bug, its issue.
 EXCLUDED = {
-    "sw_backlog": "epic is a list filter, not a pick or a write; blank kb_name filters to "
-    "nothing (#1314)",
+    "sw_backlog": "epic is optional; the handler calls KBService.locate only when it is supplied. "
+    "Scope and refusal cases are covered in test_backlog_epic_scope.py",
 }
 
 _BACKLOG = {"kind": "feature", "priority": "medium", "effort": "S"}
