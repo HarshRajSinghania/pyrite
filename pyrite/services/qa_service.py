@@ -201,7 +201,25 @@ class QAService:
         # folder that is missing or unreadable is one error for the KB, and
         # those checks are skipped, never passed or crashed (#950 round 2).
         if not self._report_unreadable_kb(issues, kb_name, tier=tier):
-            self._report_index_out_of_date(issues, kb_name)
+            from ..storage.index import IndexManager
+
+            health = IndexManager(self.db, self.config).check_health(kb_name)
+            self._report_index_out_of_date(issues, kb_name, health=health)
+            kb = self.config.get_kb(kb_name)
+            if kb is not None:
+                for row in health.get("malformed_frontmatter", []):
+                    path = str(Path(row["path"]).relative_to(kb.path))
+                    issues.append(
+                        {
+                            "entry_id": "",
+                            "kb_name": kb_name,
+                            "rule": "malformed_frontmatter",
+                            "severity": "error",
+                            "field": "frontmatter",
+                            "path": path,
+                            "message": f"{path}: {row['error']}",
+                        }
+                    )
             # Files whose frontmatter Pyrite cannot model (#760 (b)): no write
             # reaches them, so say so here with the line, as index health does.
             self._check_unmodellable_frontmatter(issues, kb_name)
@@ -260,7 +278,9 @@ class QAService:
         )
         return True
 
-    def _report_index_out_of_date(self, issues: list[dict[str, Any]], kb_name: str) -> None:
+    def _report_index_out_of_date(
+        self, issues: list[dict[str, Any]], kb_name: str, *, health: dict[str, Any] | None = None
+    ) -> None:
         """Add one ``index_out_of_date`` error when the index misses the files.
 
         Every check above the folder pass reads the index. An unindexed KB
@@ -273,7 +293,8 @@ class QAService:
 
         if self.config.get_kb(kb_name) is None:
             return
-        health = IndexManager(self.db, self.config).check_health(kb_name)
+        if health is None:
+            health = IndexManager(self.db, self.config).check_health(kb_name)
         # The same verdict every other reader of this report uses (#1119):
         # this check used to look only at unindexed/stale/missing, so an index
         # whose only defect was orphaned entries (or duplicates) passed.

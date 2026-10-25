@@ -1,0 +1,1 @@
+- QA and CI now report malformed frontmatter as an error for each file. `kb validate` includes those files in its drift report and `index sync` shows KB-relative paths (#1269).

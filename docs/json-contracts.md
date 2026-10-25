@@ -1640,6 +1640,12 @@ nothing of them. `ci` and `qa validate` report one `index_out_of_date`
 **error** for that KB, with the counts and the remedy, `pyrite index sync -k
 <kb>`. An empty KB has no files to miss and may pass.
 
+**Malformed files.** `ci`, `qa validate` and MCP `kb_qa_validate` report a
+`malformed_frontmatter` error for each file that cannot be parsed, with its
+KB-relative path and the parser's message. `kb validate` includes those rows
+under `malformed_frontmatter` for each KB and sets `has_drift`, exiting 2.
+`index health` keeps its existing warning verdict for malformed frontmatter.
+
 **A KB whose folder cannot be read.** When a KB's folder is missing, is not a
 folder, or cannot be read (its `kb.yaml` included), `ci` and `qa validate`
 (KB, entry or all) report one `kb_unreadable` **error** for that KB. The
