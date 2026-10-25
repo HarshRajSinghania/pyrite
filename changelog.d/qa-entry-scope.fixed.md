@@ -1,0 +1,1 @@
+- `qa validate --entry ID` now finds the entry's KB when none is supplied. Ambiguous and missing IDs are refused instead of silently validating every KB (#1312).
