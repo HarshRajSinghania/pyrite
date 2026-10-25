@@ -632,6 +632,51 @@ def test_a_call_with_every_id_blank_is_refused_before_anything_runs(server, monk
     assert {t: _rows(server, c.table) for t, c in CASES.items() if c.table} == rows
 
 
+@pytest.mark.parametrize(
+    "invalid",
+    ["", "  ", None, 7, True, [], {}],
+    ids=["empty", "spaces", "null", "number", "boolean", "list", "mapping"],
+)
+@pytest.mark.parametrize("position", [0, 1], ids=["before-id", "after-id"])
+def test_a_mixed_id_list_is_refused_before_anything_runs(server, monkeypatch, invalid, position):
+    """A valid id beside a blank or non-string must not let a malformed list through."""
+    srv = server["server"]
+    reached = []
+    cases = []
+    for name, tool in _locating_tools(srv).items():
+        props = tool["inputSchema"]["properties"]
+        for arg in tool["locates_entry"]["id_args"]:
+            if props[arg].get("type") == "array":
+                cases.append((name, arg))
+                monkeypatch.setitem(
+                    tool, "handler", lambda args, _n=name, **kw: reached.append(_n) or {"ok": True}
+                )
+    assert cases, "No locating tool exercises list ids"
+    files = _files(server)
+    rows = {t: _rows(server, c.table) for t, c in CASES.items() if c.table}
+
+    for name, arg in cases:
+        args = CASES[name].args(_ids(name)["one"])
+        values = [_ids(name)["one"]]
+        values.insert(position, invalid)
+        args[arg] = values
+        for kb in (None, KB_A, KB_B, "no-such-kb-1321"):
+            for scope in ({}, {"readable_kbs": {KB_A, KB_B}, "writable_kbs": {KB_A}}):
+                result = srv._dispatch_tool(
+                    name,
+                    _with_kb(args, kb),
+                    client_id=f"mixed-{name}-{arg}-{kb}-{bool(scope)}",
+                    **scope,
+                )
+                where = (name, arg, invalid, position, kb, bool(scope), result)
+                assert result.get("error_code") == "VALIDATION_FAILED", where
+                assert result.get("retryable") is False, where
+                assert f"{arg}[{position}]" in result["error"], where
+    assert reached == []
+    assert _files(server) == files
+    assert {t: _rows(server, c.table) for t, c in CASES.items() if c.table} == rows
+
+
 # -- over the wire: the SDK validates arguments against the schema first -----
 
 
@@ -678,6 +723,35 @@ def _sdk_call(srv, tool: str, arguments: dict) -> dict:
                 return {"error": text, "sdk": True}
 
     return asyncio.run(run())
+
+
+@pytest.mark.parametrize("invalid", ["", " \t\n"], ids=["empty", "spaces"])
+@pytest.mark.parametrize("position", [0, 1], ids=["before-id", "after-id"])
+def test_a_mixed_id_list_over_the_sdk_is_refused_without_writing(server, invalid, position):
+    """Blank strings pass the SDK's string schema but must never reach a writer."""
+    values = [_ids("sw_prioritize")["one"]]
+    values.insert(position, invalid)
+    before = _files(server)
+
+    result = _sdk_call(server["server"], "sw_prioritize", {"item_ids": values})
+
+    assert result.get("error_code") == "VALIDATION_FAILED", result
+    assert result.get("retryable") is False, result
+    assert f"item_ids[{position}]" in result["error"], result
+    assert _files(server) == before
+
+
+@pytest.mark.control(
+    reason="a list of valid ids already resolves and writes in the requested order"
+)
+def test_a_valid_id_list_over_the_sdk_keeps_its_order(server):
+    ids = _ids("sw_prioritize")
+    result = _sdk_call(
+        server["server"], "sw_prioritize", {"kb_name": KB_B, "item_ids": [ids["one"], ids["dup"]]}
+    )
+
+    assert result.get("error_code") is None, result
+    assert result["updated"] == [{"id": ids["one"], "rank": 100}, {"id": ids["dup"], "rank": 200}]
 
 
 @pytest.mark.parametrize("tool", sorted(CASES))

@@ -396,13 +396,17 @@ NON_KB_CONTENT_TOOLS = frozenset(
 
 
 def _located_ids(spec: dict[str, Any], arguments: dict[str, Any]) -> list[str]:
-    """The entry ids a `locates_entry` call names: each `id_args` value, a
-    string or a list of strings, with blanks and non-strings dropped."""
+    """Collect named entry ids, refusing a malformed element in any list."""
     ids: list[str] = []
     for arg in spec["id_args"]:
         value = arguments.get(arg)
-        values = value if isinstance(value, list | tuple) else [value]
-        ids.extend(v for v in values if isinstance(v, str) and v.strip())
+        if isinstance(value, list | tuple):
+            for index, entry_id in enumerate(value):
+                if not isinstance(entry_id, str) or not entry_id.strip():
+                    raise ValidationError(f"{arg}[{index}] must be a nonblank entry id")
+                ids.append(entry_id)
+        elif isinstance(value, str) and value.strip():
+            ids.append(value)
     return ids
 
 
@@ -2768,12 +2772,15 @@ class PyriteMCPServer:
         # found") and the id is verified in that KB just before the handler.
         #
         # No handler is called with an id the dispatcher has not resolved: a
-        # call whose id arguments are all blank (missing, empty, whitespace)
-        # is refused here, before any check, whatever KB it names -- else the
-        # handler would choose a KB itself (a default KB, or '').
+        # call with no ids or a malformed list element is refused here,
+        # before any check, whatever KB it names.
         spec = self.tools[name].get("locates_entry")
-        if spec and not _located_ids(spec, arguments):
-            return _refusal(ValidationError(_no_id_message(spec)))
+        if spec:
+            try:
+                if not _located_ids(spec, arguments):
+                    raise ValidationError(_no_id_message(spec))
+            except ValidationError as e:
+                return _refusal(e)
         kb_name_named = named_kb(arguments.get("kb_name")) is not None
         if spec and not kb_name_named:
             try:
