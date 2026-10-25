@@ -73,14 +73,19 @@ repos:
   #     - id: mypy
   #       additional_dependencies: [types-PyYAML]
 
-  # Local hooks. They prefer the repo's .venv but fall back to whatever
-  # `python` / `pyrite` is on PATH, so they work from a non-activated shell
-  # (agents), a differently named venv, or Windows Git Bash.
+  # Standard-library hooks prefer this checkout's venv, then python3 or
+  # python on PATH. Tests below require this checkout's own environment.
   - repo: local
     hooks:
       - id: import-cycle-check
         name: Check for circular imports
-        entry: bash -c 'PY=.venv/bin/python; [ -x "$PY" ] || PY=python; exec "$PY" scripts/check_import_cycles.py'
+        entry: >-
+          bash -c 'PY=.venv/bin/python; if [ ! -x "$PY" ] || [ ! -f "$PY" ]; then
+          PY=$(command -v python3 || command -v python || true); fi;
+          if [ -z "$PY" ] || [ ! -f "$PY" ] || [ ! -x "$PY" ]; then
+          echo "import-cycle-check: no Python interpreter found in .venv or on PATH.
+          Run scripts/setup-checkout.sh or create a worktree with scripts/new-worktree.sh."
+          >&2; exit 1; fi; exec "$PY" scripts/check_import_cycles.py'
         language: system
         pass_filenames: false
         files: '\.py$'
@@ -165,6 +170,12 @@ repos:
         stages: [pre-push]
       - id: fix-commit-has-tests
         name: "fix: commits must touch tests/"
-        entry: bash -c 'PY=.venv/bin/python; [ -x "$PY" ] || PY=python; exec "$PY" scripts/check_fix_commit_has_tests.py "$1"' --
+        entry: >-
+          bash -c 'PY=.venv/bin/python; if [ ! -x "$PY" ] || [ ! -f "$PY" ]; then
+          PY=$(command -v python3 || command -v python || true); fi;
+          if [ -z "$PY" ] || [ ! -f "$PY" ] || [ ! -x "$PY" ]; then
+          echo "fix-commit-has-tests: no Python interpreter found in .venv or on PATH.
+          Run scripts/setup-checkout.sh or create a worktree with scripts/new-worktree.sh."
+          >&2; exit 1; fi; exec "$PY" scripts/check_fix_commit_has_tests.py "$1"' --
         language: system
         stages: [commit-msg]
