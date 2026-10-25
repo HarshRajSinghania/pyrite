@@ -889,15 +889,24 @@
   },
   "kb_delete | read_key | no-default-role-kb": {
     "deleted": true,
-    "entry_id": "characterization-disposable-mutation-target"
+    "entry_id": "characterization-disposable-mutation-target",
+    "inbound_link_count": 0,
+    "inbound_links": [],
+    "warnings": []
   },
   "kb_delete | read_key | private-kb": {
     "deleted": true,
-    "entry_id": "characterization-disposable-mutation-target"
+    "entry_id": "characterization-disposable-mutation-target",
+    "inbound_link_count": 0,
+    "inbound_links": [],
+    "warnings": []
   },
   "kb_delete | read_key | readable-kb": {
     "deleted": true,
-    "entry_id": "characterization-disposable-mutation-target"
+    "entry_id": "characterization-disposable-mutation-target",
+    "inbound_link_count": 0,
+    "inbound_links": [],
+    "warnings": []
   },
   "kb_discover_neighbors | read_key | missing-kb": {
     "did_you_mean": [],

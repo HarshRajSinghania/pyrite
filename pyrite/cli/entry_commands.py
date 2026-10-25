@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import json as _json
 import logging
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -673,27 +674,52 @@ def register_entry_commands(app: typer.Typer) -> None:
         entry_id: str = typer.Argument(..., help="Entry ID to delete"),
         kb_name: str = typer.Option(..., "--kb", "-k", help="Knowledge base name"),
         force: bool = typer.Option(False, "--force", "-f", help="Skip confirmation"),
+        output_format: str = typer.Option(
+            "rich", "--format", callback=validate_output_format, help="Output format"
+        ),
     ):
         """Delete an entry from a knowledge base."""
         # Asks before it deletes, so it stays off the outcome contract: a command on
         # the contract does not prompt (ADR-0046, amendment; the prompt rule is the
         # maintainer's open question).
         if not force:
+            if not sys.stdin.isatty():
+                cli_error(
+                    "Deletion needs confirmation, but the input is not a terminal.",
+                    output_format,
+                    error_code="USAGE_ERROR",
+                    suggestion="Pass --force to delete without an interactive confirmation.",
+                )
             if not typer.confirm(f"Delete entry '{entry_id}' from KB '{kb_name}'?"):
                 raise typer.Abort()
 
-        with cli_context(kbs=(kb_name,), output_format="rich") as (config, db, svc):
+        with cli_context(kbs=(kb_name,), output_format=output_format) as (config, db, svc):
             try:
-                deleted = svc.delete_entry(entry_id, kb_name)
+                deleted = svc.delete_entry(entry_id, kb_name, readable_kbs=UNSCOPED)
                 if not deleted:
-                    cli_error(f"Entry '{entry_id}' not found", "rich", error_code="NOT_FOUND")
+                    cli_error(
+                        f"Entry '{entry_id}' not found", output_format, error_code="NOT_FOUND"
+                    )
+                payload = {"entry_id": entry_id, **deleted.as_dict()}
+                formatted = _format_output(payload, output_format)
+                if formatted is not None:
+                    typer.echo(formatted)
+                    return
                 console.print(f"[green]Deleted:[/green] {entry_id}")
+                if deleted.inbound_links:
+                    console.print(payload["warnings"][0], markup=False)
+                    for link in deleted.inbound_links:
+                        console.print(
+                            f"  {link['kb_name']}:{link['id']} ({link['relation']})",
+                            markup=False,
+                            highlight=False,
+                        )
             except EntryNotFoundError as e:
-                cli_error(str(e), "rich", error_code="NOT_FOUND")
+                cli_error(str(e), output_format, error_code="NOT_FOUND")
             except KBNotFoundError as e:
-                cli_error(str(e), "rich", error_code="KB_NOT_FOUND")
+                cli_error(str(e), output_format, error_code="KB_NOT_FOUND")
             except (PyriteError, ValueError) as e:
-                cli_error(str(e), "rich", error_code="ERROR")
+                cli_error(str(e), output_format, error_code="ERROR")
 
     @app.command("rename")
     def rename_entry(

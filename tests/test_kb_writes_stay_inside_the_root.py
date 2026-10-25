@@ -193,7 +193,7 @@ def op_rename(cell: Cell) -> Outcome:
 
 def op_delete(cell: Cell) -> Outcome:
     def call(svc):
-        if not svc.delete_entry("s", KB):
+        if not svc.delete_entry("s", KB, readable_kbs=None):
             from pyrite.exceptions import EntryNotFoundError
 
             raise EntryNotFoundError("nothing deleted")

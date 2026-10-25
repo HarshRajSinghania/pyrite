@@ -333,6 +333,27 @@ class WriteResult:
 
 
 @dataclass
+class DeleteResult:
+    """A deletion and the readable index links it left dangling."""
+
+    deleted: bool
+    inbound_links: list[dict[str, Any]] = field(default_factory=list)
+
+    def __bool__(self) -> bool:
+        return self.deleted
+
+    def as_dict(self) -> dict[str, Any]:
+        count = len(self.inbound_links)
+        noun = "link" if count == 1 else "links"
+        return {
+            "deleted": self.deleted,
+            "inbound_links": self.inbound_links,
+            "inbound_link_count": count,
+            "warnings": [f"Deletion leaves {count} indexed inbound {noun}."] if count else [],
+        }
+
+
+@dataclass
 class ReconcileResult:
     """Planned directory moves and per-entry findings from index reconciliation."""
 
@@ -2490,12 +2511,15 @@ class KBService:
         """
         return self._update(entry_id, kb_name, updates, restrict=False).entry
 
-    def delete_entry(self, entry_id: str, kb_name: str) -> bool:
+    def delete_entry(
+        self, entry_id: str, kb_name: str, *, readable_kbs: set[str] | None
+    ) -> DeleteResult:
         """
         Delete an entry.
 
         Returns:
-            True if deleted, False if not found
+            The deletion result and inbound links from readable KBs, as
+            recorded in the index. A self-link is not left dangling.
 
         Raises:
             KBNotFoundError: If KB not found
@@ -2519,6 +2543,16 @@ class KBService:
         if entry:
             entry = self._run_hooks("before_delete", entry, hook_ctx)
 
+        inbound_links = [
+            {
+                "id": link["id"],
+                "kb_name": link["kb_name"],
+                "relation": link.get("forward_relation") or link.get("relation") or "related_to",
+            }
+            for link in self.db.get_backlinks(entry_id, kb_name, readable_kbs=readable_kbs)
+            if (link["id"], link["kb_name"]) != (entry_id, kb_name)
+        ]
+
         # Delete from file system and index
         file_deleted = self._doc_mgr.delete_entry(entry_id, kb_name, kb_config)
 
@@ -2526,7 +2560,7 @@ class KBService:
         if entry:
             self._run_hooks("after_delete", entry, hook_ctx)
 
-        return file_deleted
+        return DeleteResult(file_deleted, inbound_links if file_deleted else [])
 
     def rename_entry(
         self,

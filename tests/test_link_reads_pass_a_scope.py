@@ -193,6 +193,7 @@ def test_every_call_to_a_scoped_read_passes_the_scope():
 #: call cannot be classified by name. Rule 1's TypeError covers them; the
 #: list is pinned so a new collision is a reviewed change.
 AMBIGUOUS_SCOPED_METHODS = {
+    "delete_entry": "KBService.delete_entry requires scope; storage and document deletion do not",
     "get_entry": "KBService.get_entry vs the storage row reads (PyriteDB, backends)",
     "get_status": "QAService.get_status vs other services' get_status",
     "validate_entry": "QAService.validate_entry vs KBSchema.validate_entry",

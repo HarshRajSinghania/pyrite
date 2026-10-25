@@ -14,21 +14,30 @@
   "DELETE /api/entries/{entry_id} | admin_key | no-default-role-kb": {
     "body": {
       "deleted": true,
-      "id": "characterization-disposable-admin_key-no-default-role-kb"
+      "id": "characterization-disposable-admin_key-no-default-role-kb",
+      "inbound_link_count": 0,
+      "inbound_links": [],
+      "warnings": []
     },
     "status": 200
   },
   "DELETE /api/entries/{entry_id} | admin_key | private-kb": {
     "body": {
       "deleted": true,
-      "id": "characterization-disposable-admin_key-private-kb"
+      "id": "characterization-disposable-admin_key-private-kb",
+      "inbound_link_count": 0,
+      "inbound_links": [],
+      "warnings": []
     },
     "status": 200
   },
   "DELETE /api/entries/{entry_id} | admin_key | readable-kb": {
     "body": {
       "deleted": true,
-      "id": "characterization-disposable-admin_key-readable-kb"
+      "id": "characterization-disposable-admin_key-readable-kb",
+      "inbound_link_count": 0,
+      "inbound_links": [],
+      "warnings": []
     },
     "status": 200
   },

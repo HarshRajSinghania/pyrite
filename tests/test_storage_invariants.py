@@ -254,7 +254,7 @@ class StorageMachine(RuleBasedStateMachine):
 
     @rule(id=st.sampled_from(IDS))
     def delete(self, id):
-        self._pyrite_op("delete", lambda: self.svc.delete_entry(id, KB), id=id)
+        self._pyrite_op("delete", lambda: self.svc.delete_entry(id, KB, readable_kbs=None), id=id)
 
     # -- index operations ------------------------------------------------
 

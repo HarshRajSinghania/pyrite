@@ -330,7 +330,7 @@ def test_a_create_walks_the_kb_at_most_once(tmp_path, parses, walks, n):
 def test_a_delete_miss_parses_no_more_as_the_kb_grows(tmp_path, parses, n):
     kb_path, svc, _repo, db = _kb(tmp_path, n)
     try:
-        assert svc.delete_entry("no-such-id", KB) is False
+        assert svc.delete_entry("no-such-id", KB, readable_kbs=None).deleted is False
         assert len(parses) <= 2, parses
     finally:
         db.close()

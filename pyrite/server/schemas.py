@@ -413,6 +413,14 @@ class DeleteResponse(BaseModel):
     id: str
 
 
+class EntryDeleteResponse(DeleteResponse):
+    """Entry deletion includes the readable links left dangling."""
+
+    inbound_links: list[dict[str, Any]]
+    inbound_link_count: int
+    warnings: list[str]
+
+
 class SyncResponse(BaseModel):
     """Response for index sync."""
 

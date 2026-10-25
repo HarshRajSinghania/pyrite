@@ -73,7 +73,7 @@ def test_483_delete_by_a_filename_does_not_remove_another_entry(kb):
     kb_path, svc, _repo, _db = kb
     alpha = _write(kb_path / "alpha.md", id="beta", title="Alpha")
 
-    svc.delete_entry("alpha", KB)
+    svc.delete_entry("alpha", KB, readable_kbs=None)
 
     assert alpha.exists(), "delete('alpha') removed the file holding 'beta'"
 
@@ -170,7 +170,7 @@ def test_494_delete_removes_explicit_duplicates_it_meets(kb):
     dup = _write(kb_path / "gamma.md", id="gamma", title="Alpha")
     other = _write(kb_path / "gamma-notes.md", id="delta", title="Delta")
 
-    assert svc.delete_entry("gamma", KB)
+    assert svc.delete_entry("gamma", KB, readable_kbs=None)
 
     assert not created.exists()
     assert not dup.exists(), "a second file holding 'gamma' survived its delete"
@@ -204,7 +204,7 @@ def test_delete_refuses_a_derived_id_two_same_title_notes_share(kb):
     _index(svc, db)
 
     with pytest.raises(ValidationError) as refused:
-        svc.delete_entry("draft", KB)
+        svc.delete_entry("draft", KB, readable_kbs=None)
 
     assert all(f.exists() for f in files), "delete removed a note it could not be sure of"
     assert "a.md" in str(refused.value) and "b.md" in str(refused.value)
@@ -218,7 +218,7 @@ def test_delete_refuses_the_id_untitled_notes_all_derive(kb):
     assert shared and all(entry_id_from_markdown(f.read_text()) == shared for f in files)
 
     with pytest.raises(ValidationError):
-        svc.delete_entry(shared, KB)
+        svc.delete_entry(shared, KB, readable_kbs=None)
 
     assert all(f.exists() for f in files)
 
@@ -228,7 +228,7 @@ def test_delete_removes_the_one_note_that_derives_the_id(kb):
     (only,) = _vault(kb_path, {"beta.md": "type: note\ntitle: Alpha\n"})
     _index(svc, db)
 
-    assert svc.delete_entry("alpha", KB)
+    assert svc.delete_entry("alpha", KB, readable_kbs=None)
     assert not only.exists()
     assert db.get_entry("alpha", KB) is None
 

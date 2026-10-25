@@ -1,0 +1,1 @@
+- Entry deletion now reports the indexed inbound links left dangling, scoped to the caller's readable KBs. CLI deletion supports JSON output and explains `--force` when confirmation is unavailable (#1275).

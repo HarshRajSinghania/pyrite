@@ -189,6 +189,18 @@ CLI and MCP report the code without an HTTP status.
 
 ## Write refusals (create, import, update)
 
+Entry deletion on MCP `kb_delete`, REST `DELETE /api/entries/{id}` and CLI
+`delete --force --format json` also returns `inbound_links`,
+`inbound_link_count` and `warnings`. Each link row has `id`, `kb_name` and
+the relation written by the source. Only readable KBs contribute rows or
+counts. Self-links are excluded. With no inbound links the list and warnings
+are empty and the count is zero. These are index snapshots, so a hand edit
+made since the last sync may not appear. Deletion does not edit the linkers.
+
+CLI deletion keeps its default rich output and supports `--format json`.
+Without a terminal it refuses an unconfirmed deletion with `USAGE_ERROR`
+and a suggestion to pass `--force`.
+
 Every entry write — REST `POST /api/entries`, `PUT`/`PATCH
 /api/entries/{id}`, `POST /api/entries/import`, `POST /api/clip`; MCP `kb_create`,
 `kb_update`, `kb_bulk_create`; CLI `pyrite create`, `pyrite update`,
@@ -1424,7 +1436,7 @@ checked against each command's Typer signature by
 |---|---|---|
 | `create` | yes (shared) | `json` |
 | `add` | yes (shared) | `json` |
-| `delete` | none | Rich text, always (it asks before it deletes) |
+| `delete` | yes (own option) | `rich` |
 | `link` | yes (shared) | `json` |
 | `update` | yes (shared) | `json` |
 | `rename` | yes (shared) | `json` |

@@ -1580,13 +1580,15 @@ class PyriteMCPServer:
             result["qa_issues"] = qa_issues
         return result
 
-    def _kb_delete(self, args: dict[str, Any]) -> dict[str, Any]:
+    def _kb_delete(
+        self, args: dict[str, Any], *, readable_kbs: set[str] | None = None
+    ) -> dict[str, Any]:
         """Delete an entry."""
         entry_id = args.get("entry_id")
         kb_name = args.get("kb_name")
 
         try:
-            deleted = self.svc.delete_entry(entry_id, kb_name)
+            deleted = self.svc.delete_entry(entry_id, kb_name, readable_kbs=readable_kbs)
         except PyriteError as e:
             return _error("DELETE_FAILED", _safe_message(e), retryable=True)
 
@@ -1598,7 +1600,7 @@ class PyriteMCPServer:
             refusal["suggestion"] = "Use kb_list_entries or kb_search to find entries"
             return refusal
 
-        return {"deleted": True, "entry_id": entry_id}
+        return {"entry_id": entry_id, **deleted.as_dict()}
 
     def _kb_link(self, args: dict[str, Any]) -> dict[str, Any]:
         """Create a link between two entries."""
