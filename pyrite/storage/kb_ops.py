@@ -261,7 +261,9 @@ class KBOpsMixin:
         ).fetchone()
         if row is None:
             return None
-        return dict(row._mapping)
+        stats = dict(row._mapping)
+        stats["entry_count"] = stats["actual_count"]
+        return stats
 
     def get_type_counts(
         self, kb_name: str | None = None, kb_names: set[str] | list[str] | None = None

@@ -185,6 +185,7 @@ class KBRegistryService:
         if not kb:
             return None
         cfg = self.config.get_kb(name)
+        stats = self.db.get_kb_stats(name) or {}
         return {
             "name": kb.name,
             "type": kb.kb_type,
@@ -193,7 +194,7 @@ class KBRegistryService:
             "source": kb.source or "user",
             "read_only": cfg.read_only if cfg else False,
             "shortname": cfg.shortname if cfg else None,
-            "entries": kb.entry_count or 0,
+            "entries": stats.get("entry_count", 0),
             "indexed": bool(kb.last_indexed),
             "last_indexed": kb.last_indexed,
             "default_role": kb.default_role,
@@ -525,7 +526,7 @@ class KBRegistryService:
         return self.index_mgr.sync_kb(kb_config)
 
     def health_kb(self, name: str) -> dict[str, Any]:
-        """Check KB health: path exists, file count vs index count, staleness."""
+        """Report the live entry count and the shared index-health verdict."""
         from ..storage.models import KB
 
         kb = self.db.session.get(KB, name)
@@ -541,12 +542,22 @@ class KBRegistryService:
                 1 for f in kb_path.rglob("*.md") if not any(p.startswith(".") for p in f.parts)
             )
 
-        entry_count = kb.entry_count or 0
-        healthy = path_exists and abs(file_count - entry_count) <= max(1, entry_count * 0.1)
-        from ..storage.index import IndexManager
+        from .index_health import health_verdict
 
-        cfg = self.get_kb_config(name)
-        drift = IndexManager(self.db, self.config)._type_name_drift([cfg] if cfg else [])
+        stats = self.db.get_kb_stats(name) or {}
+        entry_count = stats.get("entry_count", 0)
+        self.db.merge_registered_kbs(self.config)
+        health = IndexManager(self.db, self.config).check_health(name)
+        healthy = path_exists and not health_verdict(health)["is_unhealthy"]
+        drift = {
+            key: health[key]
+            for key in (
+                "type_name_drift",
+                "type_name_drift_total",
+                "type_name_drift_has_more",
+                "schema_errors",
+            )
+        }
 
         return {
             "name": name,
