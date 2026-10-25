@@ -2243,7 +2243,14 @@
               "tech_debt",
               "improvement",
               "spike",
-              "epic"
+              "enhancement",
+              "documentation",
+              "docs",
+              "task",
+              "epic",
+              "refactor",
+              "chore",
+              "process"
             ],
             "type": "string"
           },
@@ -2518,7 +2525,14 @@
               "tech_debt",
               "improvement",
               "spike",
-              "epic"
+              "enhancement",
+              "documentation",
+              "docs",
+              "task",
+              "epic",
+              "refactor",
+              "chore",
+              "process"
             ],
             "type": "string"
           },
@@ -4712,7 +4726,14 @@
               "tech_debt",
               "improvement",
               "spike",
-              "epic"
+              "enhancement",
+              "documentation",
+              "docs",
+              "task",
+              "epic",
+              "refactor",
+              "chore",
+              "process"
             ],
             "type": "string"
           },
@@ -7326,7 +7347,14 @@
               "tech_debt",
               "improvement",
               "spike",
-              "epic"
+              "enhancement",
+              "documentation",
+              "docs",
+              "task",
+              "epic",
+              "refactor",
+              "chore",
+              "process"
             ],
             "type": "string"
           },
@@ -7601,7 +7629,14 @@
               "tech_debt",
               "improvement",
               "spike",
-              "epic"
+              "enhancement",
+              "documentation",
+              "docs",
+              "task",
+              "epic",
+              "refactor",
+              "chore",
+              "process"
             ],
             "type": "string"
           },
