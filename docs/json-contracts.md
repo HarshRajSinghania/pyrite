@@ -179,13 +179,37 @@ CLI and MCP report the code without an HTTP status.
 | `KB_DEFINED_IN_CONFIG` | REST KB metadata changes: 409 | Edit the KB in `config.yaml`, then restart; requests cannot replace file-owned metadata. |
 | `KB_PROTECTED` | REST protected KB operation: 403 | Choose an unprotected KB or ask the operator to change its protection. |
 | `LAST_ADMIN` | REST account role change: 409 | Keep at least one administrator; promote another account first. |
-| `FORBIDDEN` | REST authorization: 403; MCP refusal | Ask the operator for the required grant. |
+| `FORBIDDEN` | REST authorization: 403; MCP refusal. A known tool above the connection's tier includes `required_tier`. | For local MCP, start `pyrite mcp --tier <required_tier>`. For HTTP, ask the operator for the required role or grant. |
 | `UNAUTHENTICATED` | REST authentication: 401; MCP refusal | Supply valid credentials before retrying. |
 | `QUERY_TOO_LONG` | Search, REST 422; CLI/MCP | Shorten the query; it is not silently truncated. |
 | `INVALID_REF` | Git-ref validation, REST 422; CLI/MCP | Use a valid git reference. |
 | `CLIPPER_BLOCKED_HOST` | Clipper, central REST mapping 500 | Choose an allowed URL; ask the operator about the host policy. |
 | `BRANDING_INVALID` | Branding configuration, REST 500 | Ask the operator to repair `branding.yaml`; repeating the request will not fix configuration. |
 | `INTERNAL_ERROR` | Unclassified domain failure, REST 500 | Consult the server log; do not assume retrying is safe. |
+
+## MCP operation codes
+
+These codes are also emitted directly by MCP handlers. Domain exceptions
+use the shared codes above and in the write-refusal table below. The legacy
+spellings remain part of the contract until their callers are migrated.
+
+| Code | Meaning | Remedy |
+|---|---|---|
+| `UNKNOWN_TOOL` | No tool with this name is known at any tier. | Use `list_tools` to check the name and installed plugins. |
+| `RATE_LIMITED` | This client's request limit was reached. `retryable` is true. | Wait for the duration in the suggestion. |
+| `MISSING_PARAM` | A legacy handler is missing a required argument. | Supply the argument named in the error. |
+| `MISSING_PARAMETER` | A handler is missing a required argument. | Supply the argument named in the error. |
+| `INVALID_PARAMETER` | An argument has an unsupported value. | Use a value allowed by the tool's input schema. |
+| `VALIDATION_ERROR` | A legacy handler rejected a value, such as a git reference. | Correct the value named in the error. |
+| `READ_ONLY` | A legacy write handler refused a read-only KB. | Choose a writable KB or ask the operator. |
+| `PROTECTED` | Removing a protected KB was refused. | Choose an unprotected KB or ask the operator. |
+| `CREATE_FAILED` | The entry could not be created. | Check whether the entry exists and inspect the server log before retrying. |
+| `BULK_CREATE_FAILED` | A bulk-create request failed. | Check which entries were created before retrying. |
+| `UPDATE_FAILED` | The requested update failed. | Read the entry and inspect the server log before retrying. |
+| `DELETE_FAILED` | The requested deletion failed. | Check whether the entry still exists and inspect the server log. |
+| `LINK_FAILED` | The requested link could not be added. | Check both entries and whether the link already exists. |
+| `OPERATION_FAILED` | A schema or git operation failed without a more specific code. | Follow the error's advice and inspect the server log. |
+| `INTERNAL` | An unexpected handler failure occurred. | Ask the operator to inspect the server log. |
 
 ## Write refusals (create, import, update)
 

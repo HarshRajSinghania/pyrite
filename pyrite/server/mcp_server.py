@@ -506,7 +506,17 @@ class PyriteMCPServer:
 
         # Rate limiter and tool→tier map
         self.rate_limiter = MCPRateLimiter(self.config.settings)
-        self._tool_tiers: dict[str, str] = {}
+        from .tool_schemas import ADMIN_TOOLS, READ_TOOLS, WRITE_TOOLS
+
+        self._tool_tiers: dict[str, str] = {
+            name: required
+            for required, schemas in (
+                ("read", READ_TOOLS),
+                ("write", WRITE_TOOLS),
+                ("admin", ADMIN_TOOLS),
+            )
+            for name in schemas
+        }
 
         # Build tool registry based on tier
         self.tools = {}
@@ -649,10 +659,10 @@ class PyriteMCPServer:
             # with the server's tier would make a plugin's read tools look
             # like writes to the per-KB write check and the rate limiter.
             lower: set[str] = set()
-            for tier in self.VALID_TIERS[: self.VALID_TIERS.index(self.tier) + 1]:
+            for tier in self.VALID_TIERS:
                 at_tier = plugin_tools if tier == self.tier else registry.get_all_mcp_tools(tier)
                 for name in at_tier:
-                    if name not in lower and name in plugin_tools:
+                    if name not in lower:
                         self._tool_tiers[name] = tier
                 lower.update(at_tier)
             for name, schema in plugin_tools.items():
@@ -2713,6 +2723,21 @@ class PyriteMCPServer:
         that target bound for this call (`services.write_target.binding`).
         """
         if name not in self.tools:
+            required = self._tool_tiers.get(name)
+            if required and self.VALID_TIERS.index(required) > self.VALID_TIERS.index(self.tier):
+                suggestion = (
+                    f"Start the server with pyrite mcp --tier {required}."
+                    if client_kind in (None, "local")
+                    else f"This tool needs the {required} role. Ask the operator for access."
+                )
+                return {
+                    **_error(
+                        "FORBIDDEN",
+                        f"Tool '{name}' requires the {required} tier.",
+                        suggestion=suggestion,
+                    ),
+                    "required_tier": required,
+                }
             return _error(
                 "UNKNOWN_TOOL",
                 f"Unknown tool: {name}",
