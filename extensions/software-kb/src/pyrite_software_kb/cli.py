@@ -1439,6 +1439,8 @@ def sw_log_cmd(
         console.print(path_line("  File: ", result.get("filename", ""), path_style="cyan"))
     else:
         console.print(f"[red]Error:[/red] {result.get('error', 'Unknown error')}")
+        if result.get("suggestion"):
+            console.print(result["suggestion"], markup=False, highlight=False)
         raise typer.Exit(1)
 
 

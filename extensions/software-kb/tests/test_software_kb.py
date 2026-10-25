@@ -2239,7 +2239,9 @@ class TestSwCreateAdrNumbersFromFiles:
             result = plugin._mcp_create_adr({"kb_name": "test", "title": "Next Decision"})
             assert result["created"] is True
             assert result["adr_number"] == 2
-            assert result["filename"] == "adrs/0002-next-decision.md"
+            assert result["filename"] == "adrs/adr-0002.md"
+            assert (tmp_path / result["filename"]).is_file()
+            assert db.get_entry("adr-0002", "test") is not None
         finally:
             db.close()
 
@@ -2252,7 +2254,9 @@ class TestSwCreateAdrNumbersFromFiles:
             result = plugin._mcp_create_adr({"title": "No KB Flag"})
             assert result["created"] is True
             assert result["adr_number"] == 1
-            assert result["filename"] == "adrs/0001-no-kb-flag.md"
+            assert result["filename"] == "adrs/adr-0001.md"
+            assert (tmp_path / result["filename"]).is_file()
+            assert db.get_entry("adr-0001", "test") is not None
         finally:
             db.close()
 
@@ -2276,7 +2280,9 @@ class TestSwCreateAdrNumbersFromFiles:
             result = plugin._mcp_create_adr({"kb_name": "test", "title": "First File ADR"})
             assert result["created"] is True
             assert result["adr_number"] == 1
-            assert result["filename"] == "adrs/0001-first-file-adr.md"
+            assert result["filename"] == "adrs/adr-0001.md"
+            assert (tmp_path / result["filename"]).is_file()
+            assert db.get_entry("adr-0001", "test") is not None
         finally:
             db.close()
 

@@ -3999,8 +3999,8 @@
     "body": "## Context\n\nTODO\n\n## Decision\n\nTODO\n\n## Consequences\n\nTODO",
     "created": true,
     "deciders": [],
-    "filename": "adrs/0001-characterization-title-sw-create-adr-admin-key-no-default-role-kb.md",
-    "note": "Create the markdown file with this frontmatter and body to complete.",
+    "filename": "adrs/adr-0001.md",
+    "id": "adr-0001",
     "status": "proposed",
     "title": "characterization-title-sw_create_adr-admin_key-no-default-role-kb"
   },
@@ -4009,8 +4009,8 @@
     "body": "## Context\n\nTODO\n\n## Decision\n\nTODO\n\n## Consequences\n\nTODO",
     "created": true,
     "deciders": [],
-    "filename": "adrs/0001-characterization-title-sw-create-adr-admin-key-private-kb.md",
-    "note": "Create the markdown file with this frontmatter and body to complete.",
+    "filename": "adrs/adr-0001.md",
+    "id": "adr-0001",
     "status": "proposed",
     "title": "characterization-title-sw_create_adr-admin_key-private-kb"
   },
@@ -4019,8 +4019,8 @@
     "body": "## Context\n\nTODO\n\n## Decision\n\nTODO\n\n## Consequences\n\nTODO",
     "created": true,
     "deciders": [],
-    "filename": "adrs/0001-characterization-title-sw-create-adr-admin-key-readable-kb.md",
-    "note": "Create the markdown file with this frontmatter and body to complete.",
+    "filename": "adrs/adr-0001.md",
+    "id": "adr-0001",
     "status": "proposed",
     "title": "characterization-title-sw_create_adr-admin_key-readable-kb"
   },

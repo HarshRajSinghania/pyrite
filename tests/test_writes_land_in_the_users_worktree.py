@@ -526,9 +526,7 @@ MCP_CASES: dict[str, Case] = {
             (SW, "backlog_item", "kind: feature\nstatus: accepted\n"),
         ),
     ),
-    "sw_create_adr": Case(
-        NO_KB_FILE, lambda s: {"kb_name": SW, "title": f"Adr {s.tag}"}, reason=_ADVISORY
-    ),
+    "sw_create_adr": Case(WRITES, lambda s: {"kb_name": SW, "title": f"Adr {s.tag}"}),
     "sw_claim": Case(
         WRITES,
         lambda s: {"kb_name": SW, "item_id": s[0], "assignee": "agent:x"},
@@ -554,10 +552,9 @@ MCP_CASES: dict[str, Case] = {
         seeds=((SW, "backlog_item", "kind: feature\nstatus: proposed\n"),),
     ),
     "sw_log": Case(
-        NO_KB_FILE,
+        WRITES,
         lambda s: {"kb_name": SW, "item_id": s[0], "summary": "did a thing"},
         seeds=((SW, "backlog_item", "kind: feature\nstatus: in_progress\n"),),
-        reason=_ADVISORY,
     ),
     "social_post": Case(
         WRITES,

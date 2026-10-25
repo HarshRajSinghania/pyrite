@@ -5,10 +5,9 @@ from collections.abc import Callable
 from datetime import UTC
 from typing import Any, ClassVar
 
-from pyrite.exceptions import PyriteError, public_text
+from pyrite.exceptions import PyriteError, SchemaViolationError, public_text
 from pyrite.plugins.capabilities import Capability
 from pyrite.plugins.scoping import kb_scope_clause
-from pyrite.schema import generate_entry_id
 
 from .adr_listing import adr_relations, adr_sort_key
 from .entry_types import (
@@ -44,6 +43,14 @@ def _safe_error(e: Exception) -> str:
     other transport already shows; the real detail still reaches the log.
     """
     return public_text(e, log=_masked_log)
+
+
+def _saved_filename(kb, entry) -> str:
+    from pyrite.storage.repository import KBRepository
+
+    repo = KBRepository(kb)
+    path = repo._resolve_file_path(entry, repo._infer_subdir(entry))
+    return str(path.relative_to(kb.path))
 
 
 # Default page size for list-shaped sw_* surfaces (#233). These commands are
@@ -1776,7 +1783,6 @@ class SoftwareKBPlugin:
 
         next_num = next_adr_number(kb_conf)
         title = args["title"]
-        slug = generate_entry_id(title)
         status = args.get("status", "proposed")
 
         # Build structured body
@@ -1789,16 +1795,39 @@ class SoftwareKBPlugin:
         body_parts.append(f"## Consequences\n\n{consequences or 'TODO'}")
         body = "\n\n".join(body_parts)
 
-        return {
-            "created": True,
-            "adr_number": next_num,
-            "title": title,
-            "status": status,
-            "filename": f"adrs/{next_num:04d}-{slug}.md",
-            "body": body,
-            "deciders": args.get("deciders", []),
-            "note": "Create the markdown file with this frontmatter and body to complete.",
-        }
+        from datetime import date
+
+        from pyrite.services.kb_service import KBService
+
+        db, should_close = self._get_db()
+        try:
+            entry = KBService(config, db).create_entry(
+                kb_conf.name,
+                f"adr-{next_num:04d}",
+                title,
+                "adr",
+                body,
+                owns=frozenset({"adr_number"}),
+                adr_number=next_num,
+                status=status,
+                date=date.today().isoformat(),
+                deciders=args.get("deciders", []),
+            )
+            return {
+                "created": True,
+                "id": entry.id,
+                "adr_number": next_num,
+                "title": title,
+                "status": status,
+                "filename": _saved_filename(kb_conf, entry),
+                "body": body,
+                "deciders": args.get("deciders", []),
+            }
+        except PyriteError as exc:
+            return {"created": False, "error": _safe_error(exc), "error_code": exc.error_code}
+        finally:
+            if should_close:
+                db.close()
 
     def _mcp_review_queue(
         self, args: dict[str, Any], *, readable_kbs: set[str] | None = None
@@ -3098,6 +3127,8 @@ class SoftwareKBPlugin:
         """Log a work session for a backlog item."""
         from datetime import datetime
 
+        from pyrite.services.kb_service import KBService
+
         item_id = args["item_id"]
         kb_name = args["kb_name"]
         summary = args["summary"]
@@ -3137,6 +3168,19 @@ class SoftwareKBPlugin:
                 "inverse": "has_session",
             }
 
+            config = self._get_config()
+            svc = KBService(config, db)
+            kb_config = svc.require_kb(kb_name)
+            saved = svc.create_entry(
+                kb_name,
+                log_id,
+                f"Work session for {entry['title']}",
+                "work_log",
+                summary,
+                links=[link],
+                **{key: value for key, value in frontmatter.items() if key != "type"},
+            )
+
             return {
                 "created": True,
                 "id": log_id,
@@ -3145,9 +3189,18 @@ class SoftwareKBPlugin:
                 "frontmatter": frontmatter,
                 "body": summary,
                 "link": link,
-                "filename": f"work-logs/{log_id}.md",
-                "note": "Create the markdown file with this frontmatter, body, and link to complete.",
+                "filename": _saved_filename(kb_config, saved),
             }
+        except PyriteError as exc:
+            refused = {"created": False, "error": _safe_error(exc), "error_code": exc.error_code}
+            if isinstance(exc, SchemaViolationError):
+                schema = kb_config.kb_schema
+                if "work_log" not in schema.types:
+                    refused["suggestion"] = (
+                        "Add work_log under types: in this KB's kb.yaml, with "
+                        "subdirectory: work-logs/ and required: [title]."
+                    )
+            return refused
         finally:
             if should_close:
                 db.close()

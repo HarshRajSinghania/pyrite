@@ -1280,6 +1280,32 @@
           },
           "subdirectory": "users/"
         },
+        "work_log": {
+          "description": "Work session linked to a backlog item",
+          "fields": {
+            "date": {
+              "description": "",
+              "type": "date"
+            },
+            "decisions": {
+              "description": "",
+              "type": "text"
+            },
+            "item_id": {
+              "description": "",
+              "type": "text"
+            },
+            "open_questions": {
+              "description": "",
+              "type": "text"
+            },
+            "rejected": {
+              "description": "",
+              "type": "text"
+            }
+          },
+          "subdirectory": "work-logs/"
+        },
         "writeup": {
           "description": "User-authored writeup (essay, story, review, etc.)",
           "fields": {
@@ -2066,6 +2092,32 @@
             }
           },
           "subdirectory": "users/"
+        },
+        "work_log": {
+          "description": "Work session linked to a backlog item",
+          "fields": {
+            "date": {
+              "description": "",
+              "type": "date"
+            },
+            "decisions": {
+              "description": "",
+              "type": "text"
+            },
+            "item_id": {
+              "description": "",
+              "type": "text"
+            },
+            "open_questions": {
+              "description": "",
+              "type": "text"
+            },
+            "rejected": {
+              "description": "",
+              "type": "text"
+            }
+          },
+          "subdirectory": "work-logs/"
         },
         "writeup": {
           "description": "User-authored writeup (essay, story, review, etc.)",
