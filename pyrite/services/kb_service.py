@@ -13,6 +13,7 @@ import os
 import re
 import shlex
 import stat
+from collections import Counter
 from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime
@@ -608,7 +609,7 @@ class KBService:
         before: dict[str, Any] | None = None,
         existing_entry: Entry | None = None,
     ) -> list[dict[str, Any]]:
-        """Refuse a write the KB schema or a plugin validator rejects.
+        """Refuse a write the model, KB schema or a plugin validator rejects.
 
         The same rules `index health` and `schema validate` report after the
         fact (enum, required, min/max, pattern) are applied before the file is
@@ -623,12 +624,37 @@ class KBService:
         refusal (:meth:`_keep_on_disk_enum_values`). Create passes none and
         is always strict.
         """
+        # Keep the full message so another invalid value remains a new error.
+        prior_model_errors = Counter(
+            existing_entry.validate()
+            if existing_entry is not None and type(existing_entry) is type(entry)
+            else []
+        )
+        model_errors = []
+        model_warnings = []
+        for message in entry.validate():
+            if prior_model_errors[message]:
+                prior_model_errors[message] -= 1
+                model_warnings.append(
+                    {
+                        "field": "",
+                        "rule": "model_validation",
+                        "severity": "warning",
+                        "message": message,
+                        "note": "violation already on disk; kept",
+                    }
+                )
+            else:
+                model_errors.append(message)
+        if model_errors:
+            raise ValidationError("; ".join(model_errors))
+
         fields = self._validated_fields(entry)
         result = self._schema_result(entry, fields, kb_name, kb_config, existing_entry)
         if result is None:  # a broken validator must not make every write fail
-            return []
+            return model_warnings
         errors = result.get("errors") or []
-        warnings = list(result.get("warnings") or [])
+        warnings = [*model_warnings, *(result.get("warnings") or [])]
         if before is not None and errors:
             errors, excepted = self._keep_on_disk_enum_values(errors, before, fields)
             warnings.extend(excepted)
@@ -1320,10 +1346,6 @@ class KBService:
         else:
             entry = builder(entry_type, entry_id, title, body, fields)
 
-        # The model's own rules (an event needs a date, importance 1-10, ...).
-        errors = entry.validate()
-        if errors:
-            raise ValidationError("; ".join(errors))
         # A new entry's own links (a file given to `add`, a create's `links`
         # field, an import) are ingest, not a link the caller is typing: only
         # what the index insert cannot store is refused (check_link_target) --

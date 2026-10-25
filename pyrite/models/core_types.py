@@ -204,8 +204,10 @@ class EventEntry(Temporal, Locatable, Statusable, Entry):
         elif not validate_date(self.date):
             errors.append(f"Invalid date format: {self.date} (expected YYYY-MM-DD)")
 
-        if not validate_importance(self.importance):
-            errors.append(f"Importance must be 1-10, got: {self.importance}")
+        # Validate the file's value when loading fell back to a default.
+        importance = self.unrepresented_frontmatter().get("importance", self.importance)
+        if not validate_importance(importance):
+            errors.append(f"Importance must be 1-10, got: {importance}")
 
         return errors
 

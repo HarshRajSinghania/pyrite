@@ -2548,7 +2548,7 @@ def _plain_ok(value: str, flow: bool, timestamp: bool) -> bool:
         return False
     try:
         loaded = _yaml().load(f"k: [{value}]" if flow else f"k: {value}")
-    except YAMLError:
+    except (YAMLError, ValueError):
         return False
     if not isinstance(loaded, Mapping) or list(loaded) != ["k"]:
         return False

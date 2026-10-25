@@ -1,13 +1,15 @@
 """Validation utilities for KB schema fields."""
 
 import re
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any
 
 
-def validate_date(date_str: str) -> bool:
-    """Validate date string format (YYYY-MM-DD)."""
-    if not date_str:
+def validate_date(date_str: Any) -> bool:
+    """Validate YYYY-MM-DD text or the date object YAML reads from it."""
+    if isinstance(date_str, date):
+        date_str = date_str.isoformat()
+    if not isinstance(date_str, str) or not date_str:
         return False
     pattern = r"^\d{4}-\d{2}-\d{2}$"
     if not re.match(pattern, date_str):
