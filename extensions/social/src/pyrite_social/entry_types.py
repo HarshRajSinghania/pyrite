@@ -20,18 +20,54 @@ class WriteupEntry(NoteEntry):
     writeup_type: str = "essay"  # essay, story, review, howto, opinion
     allow_voting: bool = True
 
+    @property
+    def entry_type(self) -> str:
+        return "writeup"
+
+    def to_frontmatter(self) -> dict[str, Any]:
+        meta = super().to_frontmatter()
+        meta["type"] = "writeup"
+        if self.author_id:
+            meta["author_id"] = self.author_id
+        meta["writeup_type"] = self.writeup_type
+        if not self.allow_voting:
+            meta["allow_voting"] = self.allow_voting
+        return meta
+
+    @classmethod
+    def from_frontmatter(cls, meta: dict[str, Any], body: str) -> "WriteupEntry":
+        kw = cls._base_kwargs(meta, body)
+        kw["author_id"] = meta.get("author_id", "")
+        kw["writeup_type"] = meta.get("writeup_type", "essay")
+        kw["allow_voting"] = meta.get("allow_voting", True)
+        return cls(**kw)
+
 
 @dataclass
 class UserProfileEntry(PersonEntry):
-    """A user profile in a social knowledge base."""
+    """A user profile in a social knowledge base.
 
-    role: str = ""
-    affiliations: list[str] = field(default_factory=list)
-    research_status: ResearchStatus = ResearchStatus.STUB
+    Stored at: users/<user_id>.md
+    """
+
     reputation: int = 0
     join_date: str = ""
     writeup_count: int = 0
 
+    @property
+    def entry_type(self) -> str:
+        return "user_profile"
+
+    def to_frontmatter(self) -> dict[str, Any]:
+        meta = super().to_frontmatter()
+        meta["type"] = "user_profile"
+        meta["reputation"] = self.reputation
+        if self.join_date:
+            meta["join_date"] = self.join_date
+        meta["writeup_count"] = self.writeup_count
+        return meta
+
+    @classmethod
     def from_frontmatter(cls, meta: dict[str, Any], body: str) -> "UserProfileEntry":
         from pyrite.schema import ResearchStatus
 
