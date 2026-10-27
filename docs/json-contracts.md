@@ -276,7 +276,7 @@ is reproduced by a command in "Reproduce the codes" below, which CI runs.
 | `VALIDATION_FAILED` | anything else the entry model refuses (an event without a date, a missing title), a `managed_fields` key in an update, a field Pyrite or the type manages on a create at any spelling (`status_change_log`, `adr_number`, `file_path`, ...: top level, dotted `metadata.k`, under `metadata`, or an alias of the field; REST `POST` refuses only the `metadata` spelling, see above; #1010), an `entry` key holding a whole `kb_get` envelope sent to `kb_update` or REST `PUT` (send `result["entry"]`'s fields at the top level; the file is left untouched; #1024), and the ADR-0034 truncated-body refusal below. Unchanged by ADR-0037 theme 2 (2026-09-25): REST, MCP and the CLI already agreed on this code, so no `legacy_error_code`. | Fix the named field. For a truncated body, reassemble it with `kb_read_body` and retry without the marker. |
 | `CONFLICT` | the file kept changing between the update's read and its replace, five tries in a row; nothing was written. REST answers `409`; MCP and the CLI use the shape above. | Re-read the entry, then repeat the update. |
 | `STORAGE_ERROR` | a storage fault on the write (REST `500`). The message is fixed text; the cause is in the server log. One exception: an index Pyrite cannot bring to its schema when it opens it (a column that cannot be added in place, a migration that failed) is refused with a message naming only schema versions and `table.column`, plus a `suggestion` (#1260); a lock met while opening, upgrading or writing the index is the retryable one. | Read `retryable`: `true` only for a locked database, so wait and repeat; `false` needs an administrator. |
-| `OUTSIDE_KB_ROOT` | a write to a KB entry whose path leaves the KB root: the entry file, or a folder on its path, is a symbolic link to somewhere outside the KB's folder, or a configured path (a type's `subdirectory`, a `file_pattern`) leads outside it. The writer opens each folder beneath the KB root without following a link, so a folder swapped for a link while the write runs is refused the same way. Every write refuses it before anything is written: `create`, `update` (including `qa fix`'s), `rename`, `delete`, `schema migrate`, the reconcile move, software-kb's `migrate-standards`. An update used to write through such a link to its target. A link whose target is inside the KB is still written through, and stays a link. The message names no path; the server log does. Two neighbours keep their codes: a write to a file with more than one hard link is `STORAGE_ERROR` (its other name may be outside the KB; the message names the KB-relative path only), in a KB under git or not, and a `rename` of an entry whose file is a symbolic link is `VALIDATION_FAILED` with the reason (the link's target is never removed). | Replace the link with the file or folder it points to, inside the KB, then retry. |
+| `OUTSIDE_KB_ROOT` | a write to a KB entry whose path leaves the KB root: the entry file, or a folder on its path, is a symbolic link to somewhere outside the KB's folder, or a configured path (a type's `subdirectory`, a `file_pattern`) leads outside it. The writer opens each folder beneath the KB root without following a link, so a folder swapped for a link while the write runs is refused the same way. Every write refuses it before anything is written: `create`, `update` (including `qa fix`'s), `rename`, `delete`, `schema migrate`, the reconcile move, software-kb's `migrate-standards`. An update used to write through such a link to its target. A link whose target is inside the KB is still written through, and stays a link. The message names no path; the server log does. Two neighbours keep their codes: a write to a file with more than one hard link is `STORAGE_ERROR` (its other name may be outside the KB; the message names the KB-relative path only), in a KB under git or not, and `migrate-standards`, which moves the file, refuses an entry whose file is a symbolic link with `VALIDATION_FAILED` and the reason (the link's target is never removed). A `rename` moves nothing, so it is written through a link whose target is inside the KB, as an update is. | Replace the link with the file or folder it points to, inside the KB, then retry. |
 | `LANDING_REFUSED` | a write with no place to land under the KB's `landing` (ADR-0044 §1): the KB is `landing: review` and the writer's change set cannot be made (no git repository, no user to own it), a write that names several KBs one of which lands in a change set, or a database-only record asked of a change set (a review verdict: `sw_review`, `POST`/`DELETE /api/reviews` on a `landing: review` KB), which the change set could not carry through its merge; that one is available to the operator, or after the merge. Nothing is written to the KB's files or its index, and a write never falls back to them. The refusals above come before the working copy is made, so none leaves a worktree or branch behind. Two refusals after it is made are possible in principle (its config or its index cannot be opened); they leave the new working copy, unused, at main's commit. | Write to one KB at a time, or ask the operator about the KB's landing. |
 | `QUERY_SYNTAX` | (`search`, not a write, but what an agent hits right after a failed write) a token containing `-`, `:` or `.` used beside `AND`/`OR`/`NOT` or a quote, unquoted. | Quote the token yourself: `"bar-baz"`. |
 
@@ -869,7 +869,7 @@ KB's task schema allows. It has no short flag: `-f` was `--format` on the
 **not** `--field` as on `create`/`update`.
 
 `pyrite link <source> <target> -k <kb> -r <relation>` answers
-`{"links": [{"created": true, "source", "relation", "target", "target_kb"}], "outcome": "done"}`
+`{"links": [{"created": true, "source", "relation", "target", "target_kb", "resolved"}], "outcome": "done"}`
 (`target_kb` is the KB the link points into: the one name for it across the link family, here and in `links bulk-create`; a bare `kb` is not a key of these payloads)
 (`--bidi` adds the inverse as a second item; one that failed is in `"failed"`,
 with `"outcome": "partial"` and exit `3`); under
@@ -1217,6 +1217,38 @@ link `--target-kb ops-kb` asks for), whatever prefix the file wrote.
 
 `outlinks` rows carry one field, `relation`, which is the forward relation.
 
+### Resolved: does the target exist for this caller?
+
+Every `outlink` and `backlink` row also carries `resolved: true|false` (#64):
+whether the target exists *for this caller*, the same field `kb_link` and
+`pyrite link --allow-dangling` report on write. A backlink row is never
+unresolved -- the row exists because the source exists and the target is the
+entry being read.
+
+On an `outlink` whose `resolved` is `false`, the row also carries
+`resolved_in_kbs`, a list of KBs (sorted) the target id exists in that this
+caller can read: a dangling `[[widget]]` whose id lives in both `ops` and
+`research` reads `"resolved_in_kbs": ["ops", "research"]`. A caller who can
+read neither KB gets `[]` -- an unreadable copy is indistinguishable from a
+missing one (ADR-0037, section 4). A `resolved: true` row carries no
+`resolved_in_kbs`.
+
+`pyrite link --allow-dangling --bidi` to a missing target writes the forward
+link and cannot write the inverse on an entry that does not exist: the run
+ends `partial` (exit 3) with the inverse in `failed`.
+
+`resolved` is computed when the link is read, so a forward reference written
+with `--allow-dangling` flips to `true` the moment its target is created, with
+no rewrite of the link itself.
+
+Through the multi-user overlay (experimental) the answer is the overlay
+reader's: a target held by either the shared index or the user's pending edits
+resolves a link held by the other, and `resolved_in_kbs` names the readable KBs
+holding the id in either. A row's `title` is null exactly when `resolved` is
+`false`. A target that a change set created and then deleted is unresolved
+again; a target held by main and deleted in a change set still resolves, as
+`get_entry` still finds it (the overlay has no tombstones yet).
+
 ## Body truncation
 
 Entries with large bodies may come back chunked. When truncated, the
@@ -1558,6 +1590,13 @@ is the error shape above in one line.
 }
 ```
 
+### Entry rename and file placement
+
+Renaming an entry changes its id while preserving its filename and folder.
+A subsequent update or delete resolves the new id in the existing file.
+Updates preserve deliberate placement, including the KB root; a schema with
+a templated subdirectory may still move the file when its folder fields change.
+
 ## QA results: only what ran
 
 A QA result says a check passed, or a fix landed, only when that check ran or
@@ -1679,3 +1718,13 @@ fixes were attempted and failed. `manual` keeps only the issues a person must
 decide. One failed entry does not
 stop the rest. With `--dry-run`, `fixed` lists what would be attempted and
 `failed` is empty.
+
+**Schema issues name their rule.** A `schema_violation` issue in `qa validate`
+(and in the `issues` a `qa fix` reads), an error or a warning alike, carries
+`schema_rule`: the rule the schema or a plugin validator broke (`required`,
+`enum`, `field_select`, ...), beside `field`. A caller tells a required field
+from this key, never from the message. A validator that names no rule adds no
+key. `qa fix` offers no fix for a schema issue: a required field is reported
+in `manual` with `reason: "no_safe_default"`, any other schema issue with
+`not_auto_fixable`; `--fix-rule schema_violation` still selects them and
+writes nothing.
